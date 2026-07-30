@@ -1,5 +1,6 @@
 package org.icbca.gateway.usage;
 
+import org.icbca.gateway.auth.ApiKeyStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -25,12 +26,18 @@ public final class InMemoryUsageRecorder implements UsageRecorder {
 
     private final ConcurrentHashMap<String, Counters> byDimension = new ConcurrentHashMap<String, Counters>();
     private final ZoneId zoneId;
+    private final ApiKeyStore apiKeyStore;
 
     public InMemoryUsageRecorder() {
-        this(ZoneId.systemDefault());
+        this(null, ZoneId.systemDefault());
     }
 
-    public InMemoryUsageRecorder(ZoneId zoneId) {
+    public InMemoryUsageRecorder(ApiKeyStore apiKeyStore) {
+        this(apiKeyStore, ZoneId.systemDefault());
+    }
+
+    public InMemoryUsageRecorder(ApiKeyStore apiKeyStore, ZoneId zoneId) {
+        this.apiKeyStore = apiKeyStore;
         this.zoneId = zoneId != null ? zoneId : ZoneId.systemDefault();
     }
 
@@ -91,6 +98,49 @@ public final class InMemoryUsageRecorder implements UsageRecorder {
         return list;
     }
 
+    @Override
+    public ApiKeyUsageSummary getSummary(String apiKey, String dateFilter) {
+        String key = normalizeApiKey(apiKey);
+        List<ApiKeyUsageStats> rows = getStats(key);
+        if (dateFilter != null && !dateFilter.isEmpty()) {
+            List<ApiKeyUsageStats> filtered = new ArrayList<ApiKeyUsageStats>();
+            for (ApiKeyUsageStats row : rows) {
+                if (dateFilter.equals(row.getDate())) {
+                    filtered.add(row);
+                }
+            }
+            rows = filtered;
+        }
+        String groupName = resolveGroupName(key);
+        if (rows.isEmpty()) {
+            return UsageSummaryBuilder.empty(key, key, groupName);
+        }
+        return UsageSummaryBuilder.buildOne(rows, groupName);
+    }
+
+    @Override
+    public List<ApiKeyUsageSummary> getAllSummaries(String dateFilter) {
+        List<ApiKeyUsageSummary> built = UsageSummaryBuilder.buildAll(getAllStats(),
+                dateFilter == null || dateFilter.isEmpty() ? null : dateFilter);
+        List<ApiKeyUsageSummary> withGroup = new ArrayList<ApiKeyUsageSummary>();
+        for (ApiKeyUsageSummary s : built) {
+            withGroup.add(new ApiKeyUsageSummary(
+                    s.getApiKey(),
+                    s.getName(),
+                    resolveGroupName(s.getApiKey()),
+                    s.getTotal(),
+                    s.getDaily()));
+        }
+        return withGroup;
+    }
+
+    private String resolveGroupName(String key) {
+        if (apiKeyStore != null) {
+            return apiKeyStore.resolveGroupName(key);
+        }
+        return ApiKeyStore.ANONYMOUS_KEY.equals(key) ? ApiKeyStore.ANONYMOUS_KEY : "default";
+    }
+
     private static void sort(List<ApiKeyUsageStats> list) {
         Collections.sort(list, new Comparator<ApiKeyUsageStats>() {
             @Override
@@ -99,7 +149,7 @@ public final class InMemoryUsageRecorder implements UsageRecorder {
                 if (c != 0) {
                     return c;
                 }
-                c = b.getDate().compareTo(a.getDate()); // newer date first
+                c = b.getDate().compareTo(a.getDate());
                 if (c != 0) {
                     return c;
                 }

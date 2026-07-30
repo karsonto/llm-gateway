@@ -20,17 +20,23 @@ public final class GatewayConfig {
     private final int vllmPort;
     private final int maxContentLength;
     private final Set<String> pathWhitelist;
-    /** key -> optional display name; empty map means open auth mode. */
+    /** key -> optional display name; empty map means open auth mode (memory mode only). */
     private final Map<String, String> apiKeys;
+    /**
+     * SQLite file path. Non-empty enables DB-backed ApiKeyStore + UsageRecorder
+     * and ignores {@code gateway.api.keys}.
+     */
+    private final String sqlitePath;
 
     public GatewayConfig(int port, String vllmHost, int vllmPort, int maxContentLength,
-                         Set<String> pathWhitelist, Map<String, String> apiKeys) {
+                         Set<String> pathWhitelist, Map<String, String> apiKeys, String sqlitePath) {
         this.port = port;
         this.vllmHost = vllmHost;
         this.vllmPort = vllmPort;
         this.maxContentLength = maxContentLength;
         this.pathWhitelist = Collections.unmodifiableSet(new LinkedHashSet<String>(pathWhitelist));
         this.apiKeys = Collections.unmodifiableMap(new LinkedHashMap<String, String>(apiKeys));
+        this.sqlitePath = sqlitePath == null ? "" : sqlitePath.trim();
     }
 
     public static GatewayConfig load() throws IOException {
@@ -64,7 +70,8 @@ public final class GatewayConfig {
             }
         }
         Map<String, String> apiKeys = parseApiKeys(props.getProperty("gateway.api.keys", ""));
-        return new GatewayConfig(port, vllmHost, vllmPort, maxContentLength, whitelist, apiKeys);
+        String sqlitePath = props.getProperty("gateway.sqlite.path", "").trim();
+        return new GatewayConfig(port, vllmHost, vllmPort, maxContentLength, whitelist, apiKeys, sqlitePath);
     }
 
     /**
@@ -123,10 +130,19 @@ public final class GatewayConfig {
     }
 
     /**
-     * Configured API keys (key -> display name). Empty means open mode.
+     * Configured API keys (key -> display name). Empty means open mode in memory mode.
+     * Ignored when {@link #isSqliteEnabled()}.
      */
     public Map<String, String> getApiKeys() {
         return apiKeys;
+    }
+
+    public String getSqlitePath() {
+        return sqlitePath;
+    }
+
+    public boolean isSqliteEnabled() {
+        return sqlitePath != null && !sqlitePath.isEmpty();
     }
 
     @Override
@@ -135,6 +151,7 @@ public final class GatewayConfig {
                 + ", vllm=" + vllmHost + ":" + vllmPort
                 + ", maxContentLength=" + maxContentLength
                 + ", pathWhitelist=" + Arrays.toString(pathWhitelist.toArray())
+                + ", sqlitePath=" + (sqlitePath.isEmpty() ? "(none)" : sqlitePath)
                 + ", apiKeysConfigured=" + !apiKeys.isEmpty()
                 + ", apiKeyCount=" + apiKeys.size()
                 + '}';

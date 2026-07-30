@@ -16,8 +16,11 @@ import io.netty.handler.codec.http.HttpUtil;
 import io.netty.handler.codec.http.HttpVersion;
 import io.netty.util.CharsetUtil;
 import org.icbca.gateway.auth.ApiKeyStore;
-import org.icbca.gateway.usage.ApiKeyUsageStats;
+import org.icbca.gateway.usage.ApiKeyUsageSummary;
+import org.icbca.gateway.usage.DailyUsageStats;
+import org.icbca.gateway.usage.ModelUsageStats;
 import org.icbca.gateway.usage.UsageRecorder;
+import org.icbca.gateway.usage.UsageTotals;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -26,8 +29,9 @@ import java.util.List;
 /**
  * Serves usage query endpoints without proxying to upstream.
  * <ul>
- *   <li>{@code GET /v1/usage} — date/model rows for the caller's API key</li>
- *   <li>{@code GET /v1/admin/usage} — all keys, no auth</li>
+ *   <li>{@code GET /v1/usage} — total + daily summary for the caller's API key</li>
+ *   <li>{@code GET /v1/usage?date=yyyy-MM-dd} — same, filtered to one day</li>
+ *   <li>{@code GET /v1/admin/usage} — summaries for all keys (optional {@code ?date=})</li>
  * </ul>
  */
 public final class UsageQueryHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
@@ -61,8 +65,11 @@ public final class UsageQueryHandler extends SimpleChannelInboundHandler<FullHtt
                 return;
             }
 
+            String dateFilter = extractQueryParam(request.uri(), "date");
+
             if (PATH_ADMIN_USAGE.equals(path)) {
-                writeJson(ctx, HttpResponseStatus.OK, toStatsArrayJson(usageRecorder.getAllStats()));
+                writeJson(ctx, HttpResponseStatus.OK,
+                        toSummariesArrayJson(usageRecorder.getAllSummaries(dateFilter)));
                 return;
             }
 
@@ -80,40 +87,100 @@ public final class UsageQueryHandler extends SimpleChannelInboundHandler<FullHtt
                             "invalid_api_key", "Missing or invalid API key");
                     return;
                 }
-                writeJson(ctx, HttpResponseStatus.OK, toStatsArrayJson(usageRecorder.getStats(rawKey)));
+                writeJson(ctx, HttpResponseStatus.OK,
+                        toSummaryJson(usageRecorder.getSummary(rawKey, dateFilter)));
                 return;
             }
 
             String key = rawKey != null ? rawKey : ApiKeyStore.ANONYMOUS_KEY;
-            writeJson(ctx, HttpResponseStatus.OK, toStatsArrayJson(usageRecorder.getStats(key)));
+            writeJson(ctx, HttpResponseStatus.OK,
+                    toSummaryJson(usageRecorder.getSummary(key, dateFilter)));
         } finally {
             request.release();
         }
     }
 
-    private static String toStatsJson(ApiKeyUsageStats s) {
-        return "{\"api_key\":\"" + escapeJson(s.getApiKey())
-                + "\",\"name\":\"" + escapeJson(s.getName())
-                + "\",\"date\":\"" + escapeJson(s.getDate())
-                + "\",\"model\":\"" + escapeJson(s.getModel())
-                + "\",\"request_count\":" + s.getRequestCount()
-                + ",\"prompt_tokens\":" + s.getPromptTokens()
-                + ",\"completion_tokens\":" + s.getCompletionTokens()
-                + ",\"total_tokens\":" + s.getTotalTokens()
-                + "}";
+    static String extractQueryParam(String uri, String name) {
+        if (uri == null || name == null) {
+            return null;
+        }
+        int q = uri.indexOf('?');
+        if (q < 0 || q >= uri.length() - 1) {
+            return null;
+        }
+        String query = uri.substring(q + 1);
+        String[] parts = query.split("&");
+        String prefix = name + "=";
+        for (String part : parts) {
+            if (part.startsWith(prefix)) {
+                String value = part.substring(prefix.length()).trim();
+                return value.isEmpty() ? null : value;
+            }
+        }
+        return null;
     }
 
-    private static String toStatsArrayJson(List<ApiKeyUsageStats> list) {
+    private static String toSummaryJson(ApiKeyUsageSummary s) {
+        StringBuilder sb = new StringBuilder(256);
+        sb.append("{\"api_key\":\"").append(escapeJson(s.getApiKey()))
+                .append("\",\"name\":\"").append(escapeJson(s.getName()))
+                .append("\",\"group_name\":\"").append(escapeJson(s.getGroupName()))
+                .append("\",\"total\":");
+        appendTotals(sb, s.getTotal());
+        sb.append(",\"daily\":[");
+        List<DailyUsageStats> daily = s.getDaily();
+        for (int i = 0; i < daily.size(); i++) {
+            if (i > 0) {
+                sb.append(',');
+            }
+            appendDaily(sb, daily.get(i));
+        }
+        sb.append("]}");
+        return sb.toString();
+    }
+
+    private static String toSummariesArrayJson(List<ApiKeyUsageSummary> list) {
         StringBuilder sb = new StringBuilder(256);
         sb.append('[');
         for (int i = 0; i < list.size(); i++) {
             if (i > 0) {
                 sb.append(',');
             }
-            sb.append(toStatsJson(list.get(i)));
+            sb.append(toSummaryJson(list.get(i)));
         }
         sb.append(']');
         return sb.toString();
+    }
+
+    private static void appendTotals(StringBuilder sb, UsageTotals t) {
+        sb.append("{\"request_count\":").append(t.getRequestCount())
+                .append(",\"prompt_tokens\":").append(t.getPromptTokens())
+                .append(",\"completion_tokens\":").append(t.getCompletionTokens())
+                .append(",\"total_tokens\":").append(t.getTotalTokens())
+                .append('}');
+    }
+
+    private static void appendDaily(StringBuilder sb, DailyUsageStats d) {
+        sb.append("{\"date\":\"").append(escapeJson(d.getDate()))
+                .append("\",\"request_count\":").append(d.getRequestCount())
+                .append(",\"prompt_tokens\":").append(d.getPromptTokens())
+                .append(",\"completion_tokens\":").append(d.getCompletionTokens())
+                .append(",\"total_tokens\":").append(d.getTotalTokens())
+                .append(",\"by_model\":[");
+        List<ModelUsageStats> models = d.getByModel();
+        for (int i = 0; i < models.size(); i++) {
+            if (i > 0) {
+                sb.append(',');
+            }
+            ModelUsageStats m = models.get(i);
+            sb.append("{\"model\":\"").append(escapeJson(m.getModel()))
+                    .append("\",\"request_count\":").append(m.getRequestCount())
+                    .append(",\"prompt_tokens\":").append(m.getPromptTokens())
+                    .append(",\"completion_tokens\":").append(m.getCompletionTokens())
+                    .append(",\"total_tokens\":").append(m.getTotalTokens())
+                    .append('}');
+        }
+        sb.append("]}");
     }
 
     private static void writeJson(ChannelHandlerContext ctx, HttpResponseStatus status, String json) {

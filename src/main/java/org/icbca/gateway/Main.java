@@ -3,11 +3,14 @@ package org.icbca.gateway;
 import org.icbca.gateway.auth.ApiKeyStore;
 import org.icbca.gateway.auth.AuthInspector;
 import org.icbca.gateway.auth.InMemoryApiKeyStore;
+import org.icbca.gateway.auth.SqliteApiKeyStore;
 import org.icbca.gateway.config.GatewayConfig;
+import org.icbca.gateway.db.SqliteDatabase;
 import org.icbca.gateway.inspect.ChatRequestInspector;
 import org.icbca.gateway.inspect.InspectorPipeline;
 import org.icbca.gateway.inspect.LoggingInspector;
 import org.icbca.gateway.usage.InMemoryUsageRecorder;
+import org.icbca.gateway.usage.SqliteUsageRecorder;
 import org.icbca.gateway.usage.UsageRecorder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -27,8 +30,22 @@ public final class Main {
         GatewayConfig config = GatewayConfig.load();
         log.info("Loaded {}", config);
 
-        ApiKeyStore apiKeyStore = new InMemoryApiKeyStore(config);
-        UsageRecorder usageRecorder = new InMemoryUsageRecorder();
+        final SqliteDatabase sqliteDb;
+        final ApiKeyStore apiKeyStore;
+        final UsageRecorder usageRecorder;
+
+        if (config.isSqliteEnabled()) {
+            sqliteDb = SqliteDatabase.open(config.getSqlitePath());
+            apiKeyStore = new SqliteApiKeyStore(sqliteDb);
+            usageRecorder = new SqliteUsageRecorder(sqliteDb, apiKeyStore);
+            log.info("Storage: SQLite at {} (gateway.api.keys ignored)", config.getSqlitePath());
+        } else {
+            sqliteDb = null;
+            apiKeyStore = new InMemoryApiKeyStore(config);
+            usageRecorder = new InMemoryUsageRecorder(apiKeyStore);
+            log.info("Storage: in-memory (optional gateway.api.keys)");
+        }
+
         log.info("API key auth {}", apiKeyStore.isAuthRequired() ? "enabled" : "open (no keys configured)");
 
         List<ChatRequestInspector> inspectors = new ArrayList<ChatRequestInspector>();
@@ -43,6 +60,9 @@ public final class Main {
             public void run() {
                 log.info("Shutting down gateway...");
                 server.stop();
+                if (sqliteDb != null) {
+                    sqliteDb.close();
+                }
             }
         }));
 

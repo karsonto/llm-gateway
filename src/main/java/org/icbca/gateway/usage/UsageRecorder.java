@@ -8,7 +8,7 @@ import java.util.List;
  * MVP: {@link InMemoryUsageRecorder}. Replace with a DB-backed implementation later
  * without changing call sites.
  * <p>
- * Stats are aggregated by {@code apiKey + date + model}.
+ * Stats are stored by {@code apiKey + date + model}; summaries aggregate on read.
  */
 public interface UsageRecorder {
 
@@ -19,12 +19,26 @@ public interface UsageRecorder {
     void record(String apiKey, String apiKeyName, String model, TokenUsage usage);
 
     /**
-     * All date/model rows for one API key (may be empty).
+     * Fine-grained date/model rows for one API key (may be empty).
      */
     List<ApiKeyUsageStats> getStats(String apiKey);
 
     /**
-     * All date/model rows across all API keys.
+     * Fine-grained date/model rows across all API keys.
      */
     List<ApiKeyUsageStats> getAllStats();
+
+    /**
+     * Total + daily (+ by_model) summary for one API key.
+     *
+     * @param dateFilter optional {@code yyyy-MM-dd}; null/empty = all dates
+     */
+    ApiKeyUsageSummary getSummary(String apiKey, String dateFilter);
+
+    /**
+     * Summaries for all API keys that have recorded usage.
+     *
+     * @param dateFilter optional {@code yyyy-MM-dd}; null/empty = all dates
+     */
+    List<ApiKeyUsageSummary> getAllSummaries(String dateFilter);
 }

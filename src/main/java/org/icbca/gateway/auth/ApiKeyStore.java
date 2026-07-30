@@ -24,6 +24,11 @@ public interface ApiKeyStore {
 
     String resolveName(String key);
 
+    /**
+     * Display group for the key. Unknown / anonymous keys return {@code "anonymous"} or {@code "default"}.
+     */
+    String resolveGroupName(String key);
+
     Map<String, ApiKeyInfo> getKeys();
 
     /**
