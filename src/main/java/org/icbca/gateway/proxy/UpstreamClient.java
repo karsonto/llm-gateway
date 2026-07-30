@@ -13,6 +13,7 @@ import io.netty.channel.socket.nio.NioSocketChannel;
 import io.netty.handler.codec.http.HttpClientCodec;
 import org.icbca.gateway.config.GatewayConfig;
 import org.icbca.gateway.handler.UpstreamHandler;
+import org.icbca.gateway.usage.UsageRecorder;
 
 /**
  * Opens a per-request short-lived connection to vLLM.
@@ -20,12 +21,15 @@ import org.icbca.gateway.handler.UpstreamHandler;
 public final class UpstreamClient {
 
     private final GatewayConfig config;
+    private final UsageRecorder usageRecorder;
 
-    public UpstreamClient(GatewayConfig config) {
+    public UpstreamClient(GatewayConfig config, UsageRecorder usageRecorder) {
         this.config = config;
+        this.usageRecorder = usageRecorder;
     }
 
-    public ChannelFuture connect(ChannelHandlerContext inboundCtx, String requestId, boolean expectStream) {
+    public ChannelFuture connect(ChannelHandlerContext inboundCtx, String requestId, boolean expectStream,
+                                 String apiKey, String apiKeyName, String model) {
         final Channel inbound = inboundCtx.channel();
         EventLoopGroup group = inbound.eventLoop();
         Bootstrap bootstrap = new Bootstrap();
@@ -39,7 +43,9 @@ public final class UpstreamClient {
                     protected void initChannel(SocketChannel ch) {
                         ch.pipeline()
                                 .addLast(new HttpClientCodec())
-                                .addLast(new UpstreamHandler(inbound, requestId, expectStream));
+                                .addLast(new UpstreamHandler(
+                                        inbound, requestId, expectStream,
+                                        apiKey, apiKeyName, model, usageRecorder));
                     }
                 });
         ChannelFuture future = bootstrap.connect(config.getVllmHost(), config.getVllmPort());

@@ -1,9 +1,13 @@
 package org.icbca.gateway;
 
+import org.icbca.gateway.auth.ApiKeyStore;
+import org.icbca.gateway.auth.AuthInspector;
 import org.icbca.gateway.config.GatewayConfig;
 import org.icbca.gateway.inspect.ChatRequestInspector;
 import org.icbca.gateway.inspect.InspectorPipeline;
 import org.icbca.gateway.inspect.LoggingInspector;
+import org.icbca.gateway.usage.InMemoryUsageRecorder;
+import org.icbca.gateway.usage.UsageRecorder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -22,12 +26,17 @@ public final class Main {
         GatewayConfig config = GatewayConfig.load();
         log.info("Loaded {}", config);
 
+        ApiKeyStore apiKeyStore = new ApiKeyStore(config);
+        UsageRecorder usageRecorder = new InMemoryUsageRecorder();
+        log.info("API key auth {}", apiKeyStore.isAuthRequired() ? "enabled" : "open (no keys configured)");
+
         List<ChatRequestInspector> inspectors = new ArrayList<ChatRequestInspector>();
+        inspectors.add(new AuthInspector(apiKeyStore));
         inspectors.add(new LoggingInspector());
         // Future guardrails: inspectors.add(new XxxGuardrailInspector(...));
         InspectorPipeline pipeline = new InspectorPipeline(inspectors);
 
-        final GatewayServer server = new GatewayServer(config, pipeline);
+        final GatewayServer server = new GatewayServer(config, pipeline, apiKeyStore, usageRecorder);
         Runtime.getRuntime().addShutdownHook(new Thread(new Runnable() {
             @Override
             public void run() {

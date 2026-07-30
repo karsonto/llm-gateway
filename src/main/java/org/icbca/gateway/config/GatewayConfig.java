@@ -4,7 +4,9 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
+import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
 
@@ -18,14 +20,17 @@ public final class GatewayConfig {
     private final int vllmPort;
     private final int maxContentLength;
     private final Set<String> pathWhitelist;
+    /** key -> optional display name; empty map means open auth mode. */
+    private final Map<String, String> apiKeys;
 
     public GatewayConfig(int port, String vllmHost, int vllmPort, int maxContentLength,
-                         Set<String> pathWhitelist) {
+                         Set<String> pathWhitelist, Map<String, String> apiKeys) {
         this.port = port;
         this.vllmHost = vllmHost;
         this.vllmPort = vllmPort;
         this.maxContentLength = maxContentLength;
         this.pathWhitelist = Collections.unmodifiableSet(new LinkedHashSet<String>(pathWhitelist));
+        this.apiKeys = Collections.unmodifiableMap(new LinkedHashMap<String, String>(apiKeys));
     }
 
     public static GatewayConfig load() throws IOException {
@@ -58,7 +63,39 @@ public final class GatewayConfig {
                 }
             }
         }
-        return new GatewayConfig(port, vllmHost, vllmPort, maxContentLength, whitelist);
+        Map<String, String> apiKeys = parseApiKeys(props.getProperty("gateway.api.keys", ""));
+        return new GatewayConfig(port, vllmHost, vllmPort, maxContentLength, whitelist, apiKeys);
+    }
+
+    /**
+     * Parses {@code key} or {@code key:name} entries separated by commas.
+     */
+    static Map<String, String> parseApiKeys(String raw) {
+        Map<String, String> keys = new LinkedHashMap<String, String>();
+        if (raw == null) {
+            return keys;
+        }
+        String trimmed = raw.trim();
+        if (trimmed.isEmpty()) {
+            return keys;
+        }
+        for (String part : trimmed.split(",")) {
+            String entry = part.trim();
+            if (entry.isEmpty()) {
+                continue;
+            }
+            int colon = entry.indexOf(':');
+            if (colon < 0) {
+                keys.put(entry, entry);
+            } else {
+                String key = entry.substring(0, colon).trim();
+                String name = entry.substring(colon + 1).trim();
+                if (!key.isEmpty()) {
+                    keys.put(key, name.isEmpty() ? key : name);
+                }
+            }
+        }
+        return keys;
     }
 
     public int getPort() {
@@ -85,12 +122,21 @@ public final class GatewayConfig {
         return pathWhitelist.contains(path);
     }
 
+    /**
+     * Configured API keys (key -> display name). Empty means open mode.
+     */
+    public Map<String, String> getApiKeys() {
+        return apiKeys;
+    }
+
     @Override
     public String toString() {
         return "GatewayConfig{port=" + port
                 + ", vllm=" + vllmHost + ":" + vllmPort
                 + ", maxContentLength=" + maxContentLength
                 + ", pathWhitelist=" + Arrays.toString(pathWhitelist.toArray())
+                + ", apiKeysConfigured=" + !apiKeys.isEmpty()
+                + ", apiKeyCount=" + apiKeys.size()
                 + '}';
     }
 }

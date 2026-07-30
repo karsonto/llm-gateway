@@ -10,11 +10,14 @@ import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
 import io.netty.handler.codec.http.HttpObjectAggregator;
 import io.netty.handler.codec.http.HttpServerCodec;
+import org.icbca.gateway.auth.ApiKeyStore;
 import org.icbca.gateway.config.GatewayConfig;
 import org.icbca.gateway.handler.GatewayInboundHandler;
 import org.icbca.gateway.handler.PathWhitelistHandler;
+import org.icbca.gateway.handler.UsageQueryHandler;
 import org.icbca.gateway.inspect.InspectorPipeline;
 import org.icbca.gateway.proxy.UpstreamClient;
+import org.icbca.gateway.usage.UsageRecorder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -27,19 +30,24 @@ public final class GatewayServer {
 
     private final GatewayConfig config;
     private final InspectorPipeline inspectorPipeline;
+    private final ApiKeyStore apiKeyStore;
+    private final UsageRecorder usageRecorder;
     private EventLoopGroup bossGroup;
     private EventLoopGroup workerGroup;
     private Channel serverChannel;
 
-    public GatewayServer(GatewayConfig config, InspectorPipeline inspectorPipeline) {
+    public GatewayServer(GatewayConfig config, InspectorPipeline inspectorPipeline,
+                         ApiKeyStore apiKeyStore, UsageRecorder usageRecorder) {
         this.config = config;
         this.inspectorPipeline = inspectorPipeline;
+        this.apiKeyStore = apiKeyStore;
+        this.usageRecorder = usageRecorder;
     }
 
     public void start() throws InterruptedException {
         bossGroup = new NioEventLoopGroup(1);
         workerGroup = new NioEventLoopGroup();
-        final UpstreamClient upstreamClient = new UpstreamClient(config);
+        final UpstreamClient upstreamClient = new UpstreamClient(config, usageRecorder);
 
         ServerBootstrap bootstrap = new ServerBootstrap();
         bootstrap.group(bossGroup, workerGroup)
@@ -54,13 +62,15 @@ public final class GatewayServer {
                                 .addLast(new HttpServerCodec())
                                 .addLast(new HttpObjectAggregator(config.getMaxContentLength()))
                                 .addLast(new PathWhitelistHandler(config))
+                                .addLast(new UsageQueryHandler(apiKeyStore, usageRecorder))
                                 .addLast(new GatewayInboundHandler(upstreamClient, inspectorPipeline));
                     }
                 });
 
         serverChannel = bootstrap.bind(config.getPort()).sync().channel();
-        log.info("Gateway listening on port {}, upstream {}:{}, whitelist={}",
-                config.getPort(), config.getVllmHost(), config.getVllmPort(), config.getPathWhitelist());
+        log.info("Gateway listening on port {}, upstream {}:{}, whitelist={}, authRequired={}",
+                config.getPort(), config.getVllmHost(), config.getVllmPort(),
+                config.getPathWhitelist(), apiKeyStore.isAuthRequired());
     }
 
     public void awaitTermination() throws InterruptedException {

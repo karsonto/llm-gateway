@@ -18,6 +18,8 @@ import io.netty.handler.codec.http.HttpUtil;
 import io.netty.handler.codec.http.LastHttpContent;
 import io.netty.util.ReferenceCountUtil;
 import org.icbca.gateway.parse.SseTokenParser;
+import org.icbca.gateway.usage.TokenUsage;
+import org.icbca.gateway.usage.UsageRecorder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -32,17 +34,28 @@ public final class UpstreamHandler extends ChannelInboundHandlerAdapter {
     private final Channel inbound;
     private final String requestId;
     private final boolean expectStream;
+    private final String apiKey;
+    private final String apiKeyName;
+    private final String model;
+    private final UsageRecorder usageRecorder;
     private final SseTokenParser sseParser;
     private final ByteBuf nonStreamBuffer;
     private Channel upstream;
     private boolean eventStream;
     private boolean closed;
     private boolean completed;
+    private boolean usageRecorded;
 
-    public UpstreamHandler(Channel inbound, String requestId, boolean expectStream) {
+    public UpstreamHandler(Channel inbound, String requestId, boolean expectStream,
+                           String apiKey, String apiKeyName, String model,
+                           UsageRecorder usageRecorder) {
         this.inbound = inbound;
         this.requestId = requestId;
         this.expectStream = expectStream;
+        this.apiKey = apiKey;
+        this.apiKeyName = apiKeyName;
+        this.model = model;
+        this.usageRecorder = usageRecorder;
         this.sseParser = new SseTokenParser(requestId);
         this.nonStreamBuffer = Unpooled.buffer();
     }
@@ -145,10 +158,24 @@ public final class UpstreamHandler extends ChannelInboundHandlerAdapter {
         if (!completed) {
             completed = true;
             sseParser.onComplete();
+            recordUsageOnce();
         }
         closeQuietly(upstream != null ? upstream : null);
         closeQuietly(inbound);
         cleanup();
+    }
+
+    private void recordUsageOnce() {
+        if (usageRecorded || usageRecorder == null) {
+            return;
+        }
+        usageRecorded = true;
+        TokenUsage usage = sseParser.getUsage();
+        if (usage == null) {
+            log.warn("requestId={} no usage from upstream (apiKey={}, model={}, stream={})",
+                    requestId, apiKey, model, expectStream || eventStream);
+        }
+        usageRecorder.record(apiKey, apiKeyName, model, usage);
     }
 
     @Override
@@ -156,6 +183,7 @@ public final class UpstreamHandler extends ChannelInboundHandlerAdapter {
         if (!completed) {
             completed = true;
             sseParser.onComplete();
+            recordUsageOnce();
         }
         cleanup();
         closeQuietly(inbound);

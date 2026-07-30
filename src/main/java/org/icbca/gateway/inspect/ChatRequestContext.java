@@ -78,6 +78,18 @@ public final class ChatRequestContext {
     }
 
     public String getHeader(String name) {
-        return headers.get(name);
+        if (name == null) {
+            return null;
+        }
+        String direct = headers.get(name);
+        if (direct != null) {
+            return direct;
+        }
+        for (Map.Entry<String, String> e : headers.entrySet()) {
+            if (name.equalsIgnoreCase(e.getKey())) {
+                return e.getValue();
+            }
+        }
+        return null;
     }
 }

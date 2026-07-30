@@ -20,10 +20,13 @@ import io.netty.handler.codec.http.HttpUtil;
 import io.netty.handler.codec.http.HttpVersion;
 import io.netty.util.CharsetUtil;
 import io.netty.util.ReferenceCountUtil;
+import org.icbca.gateway.auth.ApiKeyStore;
+import org.icbca.gateway.auth.AuthInspector;
 import org.icbca.gateway.inspect.ChatRequestContext;
 import org.icbca.gateway.inspect.InspectionResult;
 import org.icbca.gateway.inspect.InspectorPipeline;
 import org.icbca.gateway.parse.RequestBodyParser;
+import org.icbca.gateway.parse.RequestBodyRewriter;
 import org.icbca.gateway.proxy.UpstreamClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -63,8 +66,12 @@ public final class GatewayInboundHandler extends SimpleChannelInboundHandler<Ful
         final FullHttpRequest retained = request.retainedDuplicate();
         final boolean expectStream = chatCtx.isStream();
         final String requestId = chatCtx.getRequestId();
+        final String apiKey = stringAttr(chatCtx, AuthInspector.ATTR_API_KEY, ApiKeyStore.ANONYMOUS_KEY);
+        final String apiKeyName = stringAttr(chatCtx, AuthInspector.ATTR_API_KEY_NAME, apiKey);
+        final String model = chatCtx.getModel();
 
-        ChannelFuture connectFuture = upstreamClient.connect(ctx, requestId, expectStream);
+        ChannelFuture connectFuture = upstreamClient.connect(
+                ctx, requestId, expectStream, apiKey, apiKeyName, model);
         connectFuture.addListener(new ChannelFutureListener() {
             @Override
             public void operationComplete(ChannelFuture future) {
@@ -99,8 +106,20 @@ public final class GatewayInboundHandler extends SimpleChannelInboundHandler<Ful
         });
     }
 
+    private static String stringAttr(ChatRequestContext ctx, String attr, String defaultValue) {
+        Object v = ctx.getAttributes().get(attr);
+        if (v == null) {
+            return defaultValue;
+        }
+        String s = String.valueOf(v);
+        return s.isEmpty() ? defaultValue : s;
+    }
+
     private static FullHttpRequest buildOutboundRequest(FullHttpRequest inbound, String hostHeader) {
-        ByteBuf content = inbound.content().retainedDuplicate();
+        ByteBuf original = inbound.content();
+        ByteBuf rewritten = RequestBodyRewriter.ensureStreamUsage(original);
+        ByteBuf content = rewritten != null ? rewritten : original.retainedDuplicate();
+
         DefaultFullHttpRequest outbound = new DefaultFullHttpRequest(
                 inbound.protocolVersion(),
                 inbound.method() == null ? HttpMethod.GET : inbound.method(),

@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.util.CharsetUtil;
+import org.icbca.gateway.usage.TokenUsage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -22,9 +23,14 @@ public final class SseTokenParser {
     private final StringBuilder assistantReply = new StringBuilder(1024);
     private ByteBuf carry;
     private boolean done;
+    private TokenUsage usage;
 
     public SseTokenParser(String requestId) {
         this.requestId = requestId;
+    }
+
+    public TokenUsage getUsage() {
+        return usage;
     }
 
     /**
@@ -76,9 +82,10 @@ public final class SseTokenParser {
             if (text != null && !text.isEmpty()) {
                 log.info("requestId={} non-stream reply: {}", requestId, text);
             }
-            JsonNode usage = root.get("usage");
-            if (usage != null && !usage.isNull()) {
-                log.info("requestId={} usage: {}", requestId, usage);
+            TokenUsage parsed = parseUsage(root.get("usage"));
+            if (parsed != null) {
+                usage = parsed;
+                log.info("requestId={} non-stream usage: {}", requestId, usage);
             }
         } catch (Exception e) {
             log.warn("requestId={} failed to parse non-stream body: {}", requestId, e.getMessage());
@@ -128,15 +135,37 @@ public final class SseTokenParser {
             String token = extractDelta(root);
             if (token != null && !token.isEmpty()) {
                 assistantReply.append(token);
-                log.info("requestId={} token={}", requestId, token);
+                log.debug("requestId={} token={}", requestId, token);
             }
-            JsonNode usage = root.get("usage");
-            if (usage != null && !usage.isNull()) {
-                log.info("requestId={} usage: {}", requestId, usage);
+            TokenUsage parsed = parseUsage(root.get("usage"));
+            if (parsed != null) {
+                usage = parsed;
+                log.debug("requestId={} stream usage: {}", requestId, usage);
             }
         } catch (Exception e) {
             log.warn("requestId={} SSE data parse failed: {}", requestId, e.getMessage());
         }
+    }
+
+    static TokenUsage parseUsage(JsonNode usageNode) {
+        if (usageNode == null || usageNode.isNull() || !usageNode.isObject()) {
+            return null;
+        }
+        long prompt = readLong(usageNode, "prompt_tokens");
+        long completion = readLong(usageNode, "completion_tokens");
+        long total = readLong(usageNode, "total_tokens");
+        if (total == 0 && (prompt > 0 || completion > 0)) {
+            total = prompt + completion;
+        }
+        return new TokenUsage(prompt, completion, total);
+    }
+
+    private static long readLong(JsonNode node, String field) {
+        JsonNode v = node.get(field);
+        if (v == null || v.isNull() || !v.isNumber()) {
+            return 0L;
+        }
+        return v.asLong();
     }
 
     private static String extractDelta(JsonNode root) {
