@@ -51,7 +51,7 @@ export default function UsageByGroupPage() {
     <div className="space-y-4">
       <div>
         <h1 className="text-xl font-semibold text-slate-800">按组别用量</h1>
-        <p className="text-sm text-slate-500 mt-1">按 group_name 汇总模型消耗</p>
+        <p className="text-sm text-slate-500 mt-1">按组别汇总模型消耗</p>
       </div>
 
       <div className="flex flex-wrap gap-3 items-end rounded-xl border border-slate-200 bg-white p-4">
