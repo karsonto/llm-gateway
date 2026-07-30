@@ -75,29 +75,6 @@ java -Dgateway.config=/etc/llm-gateway/gateway.properties -jar target/llm-gatewa
 
 ## Docker
 
-### 从 Docker Hub 拉取（CI 自动构建）
-
-推送 `master` 或打 `v*` 标签后，GitHub Actions 会自动构建并推送到 Docker Hub：
-
-```bash
-docker pull <your-dockerhub-username>/llm-gateway:latest
-```
-
-#### 配置 GitHub Secrets
-
-在仓库 **Settings → Secrets and variables → Actions** 中添加：
-
-| Secret | 说明 |
-|--------|------|
-| `DOCKERHUB_USERNAME` | Docker Hub 用户名 |
-| `DOCKERHUB_TOKEN` | Docker Hub Access Token（[Account Settings → Security](https://hub.docker.com/settings/security) 创建） |
-
-工作流文件：`.github/workflows/docker-publish.yml`
-
-- `master` 分支推送 → 打 `latest` 与 commit sha 标签
-- `v1.0.0` 等 tag → 打版本号标签
-- 支持手动触发（Actions → Build and Push Docker Image → Run workflow）
-
 ### 本地构建镜像
 
 ```bash
