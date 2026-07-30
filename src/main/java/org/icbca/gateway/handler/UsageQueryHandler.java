@@ -26,7 +26,7 @@ import java.util.List;
 /**
  * Serves usage query endpoints without proxying to upstream.
  * <ul>
- *   <li>{@code GET /v1/usage} — stats for the caller's API key (open mode: optional key / anonymous)</li>
+ *   <li>{@code GET /v1/usage} — date/model rows for the caller's API key</li>
  *   <li>{@code GET /v1/admin/usage} — all keys, no auth</li>
  * </ul>
  */
@@ -62,7 +62,7 @@ public final class UsageQueryHandler extends SimpleChannelInboundHandler<FullHtt
             }
 
             if (PATH_ADMIN_USAGE.equals(path)) {
-                writeJson(ctx, HttpResponseStatus.OK, toAllStatsJson(usageRecorder.getAllStats()));
+                writeJson(ctx, HttpResponseStatus.OK, toStatsArrayJson(usageRecorder.getAllStats()));
                 return;
             }
 
@@ -80,14 +80,12 @@ public final class UsageQueryHandler extends SimpleChannelInboundHandler<FullHtt
                             "invalid_api_key", "Missing or invalid API key");
                     return;
                 }
-                ApiKeyUsageStats stats = usageRecorder.getStats(rawKey);
-                writeJson(ctx, HttpResponseStatus.OK, toStatsJson(stats));
+                writeJson(ctx, HttpResponseStatus.OK, toStatsArrayJson(usageRecorder.getStats(rawKey)));
                 return;
             }
 
             String key = rawKey != null ? rawKey : ApiKeyStore.ANONYMOUS_KEY;
-            ApiKeyUsageStats stats = usageRecorder.getStats(key);
-            writeJson(ctx, HttpResponseStatus.OK, toStatsJson(stats));
+            writeJson(ctx, HttpResponseStatus.OK, toStatsArrayJson(usageRecorder.getStats(key)));
         } finally {
             request.release();
         }
@@ -96,6 +94,8 @@ public final class UsageQueryHandler extends SimpleChannelInboundHandler<FullHtt
     private static String toStatsJson(ApiKeyUsageStats s) {
         return "{\"api_key\":\"" + escapeJson(s.getApiKey())
                 + "\",\"name\":\"" + escapeJson(s.getName())
+                + "\",\"date\":\"" + escapeJson(s.getDate())
+                + "\",\"model\":\"" + escapeJson(s.getModel())
                 + "\",\"request_count\":" + s.getRequestCount()
                 + ",\"prompt_tokens\":" + s.getPromptTokens()
                 + ",\"completion_tokens\":" + s.getCompletionTokens()
@@ -103,7 +103,7 @@ public final class UsageQueryHandler extends SimpleChannelInboundHandler<FullHtt
                 + "}";
     }
 
-    private static String toAllStatsJson(List<ApiKeyUsageStats> list) {
+    private static String toStatsArrayJson(List<ApiKeyUsageStats> list) {
         StringBuilder sb = new StringBuilder(256);
         sb.append('[');
         for (int i = 0; i < list.size(); i++) {

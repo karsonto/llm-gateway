@@ -2,6 +2,7 @@ package org.icbca.gateway;
 
 import org.icbca.gateway.auth.ApiKeyStore;
 import org.icbca.gateway.auth.AuthInspector;
+import org.icbca.gateway.auth.InMemoryApiKeyStore;
 import org.icbca.gateway.config.GatewayConfig;
 import org.icbca.gateway.inspect.ChatRequestInspector;
 import org.icbca.gateway.inspect.InspectorPipeline;
@@ -26,7 +27,7 @@ public final class Main {
         GatewayConfig config = GatewayConfig.load();
         log.info("Loaded {}", config);
 
-        ApiKeyStore apiKeyStore = new ApiKeyStore(config);
+        ApiKeyStore apiKeyStore = new InMemoryApiKeyStore(config);
         UsageRecorder usageRecorder = new InMemoryUsageRecorder();
         log.info("API key auth {}", apiKeyStore.isAuthRequired() ? "enabled" : "open (no keys configured)");
 

@@ -1,66 +1,35 @@
 package org.icbca.gateway.auth;
 
-import org.icbca.gateway.config.GatewayConfig;
-
-import java.util.Collections;
-import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * In-memory API key registry loaded from {@link GatewayConfig}.
- * Empty key set means open mode (auth not required).
+ * API key lookup used for auth and usage attribution.
+ * <p>
+ * MVP: {@link InMemoryApiKeyStore} loaded from config. Replace with a DB-backed
+ * implementation later without changing call sites.
  */
-public final class ApiKeyStore {
+public interface ApiKeyStore {
 
-    public static final String ANONYMOUS_KEY = "anonymous";
+    String ANONYMOUS_KEY = "anonymous";
 
-    private final Map<String, ApiKeyInfo> keys;
-    private final boolean authRequired;
+    /**
+     * {@code true} when keys are configured / present and requests must present a valid key.
+     * Empty store means open mode (auth not required).
+     */
+    boolean isAuthRequired();
 
-    public ApiKeyStore(GatewayConfig config) {
-        Map<String, ApiKeyInfo> map = new LinkedHashMap<String, ApiKeyInfo>();
-        for (Map.Entry<String, String> e : config.getApiKeys().entrySet()) {
-            map.put(e.getKey(), new ApiKeyInfo(e.getKey(), e.getValue(), true));
-        }
-        this.keys = Collections.unmodifiableMap(map);
-        this.authRequired = !this.keys.isEmpty();
-    }
+    ApiKeyInfo find(String key);
 
-    public boolean isAuthRequired() {
-        return authRequired;
-    }
+    boolean isValid(String key);
 
-    public ApiKeyInfo find(String key) {
-        if (key == null) {
-            return null;
-        }
-        return keys.get(key);
-    }
+    String resolveName(String key);
 
-    public boolean isValid(String key) {
-        ApiKeyInfo info = find(key);
-        return info != null && info.isEnabled();
-    }
-
-    public String resolveName(String key) {
-        if (key == null) {
-            return ANONYMOUS_KEY;
-        }
-        ApiKeyInfo info = find(key);
-        if (info != null) {
-            return info.getName();
-        }
-        return key;
-    }
-
-    public Map<String, ApiKeyInfo> getKeys() {
-        return keys;
-    }
+    Map<String, ApiKeyInfo> getKeys();
 
     /**
      * Extracts API key from Authorization Bearer or X-API-Key header values.
      */
-    public static String extractApiKey(String authorization, String xApiKey) {
+    static String extractApiKey(String authorization, String xApiKey) {
         if (xApiKey != null) {
             String trimmed = xApiKey.trim();
             if (!trimmed.isEmpty()) {
