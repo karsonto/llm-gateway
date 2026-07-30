@@ -33,6 +33,7 @@ public final class RequestBodyParser {
         boolean stream = false;
         JsonNode rawBody = null;
         List<Map<String, String>> messages = new ArrayList<Map<String, String>>();
+        Map<String, String> headers = parseHeaders(request);
 
         ByteBuf content = request.content();
         if (content != null && content.isReadable()) {
@@ -70,7 +71,20 @@ public final class RequestBodyParser {
                 }
             }
         }
-        return new ChatRequestContext(requestId, path, model, messages, prompt, stream, rawBody);
+        return new ChatRequestContext(requestId, path, model, messages, prompt, stream, rawBody, headers);
+    }
+
+    private static Map<String, String> parseHeaders(FullHttpRequest request) {
+        Map<String, String> headers = new HashMap<String, String>();
+        if (request.headers() != null) {
+            for (String name : request.headers().names()) {
+                String value = request.headers().get(name);
+                if (value != null) {
+                    headers.put(name, value);
+                }
+            }
+        }
+        return headers;
     }
 
     private static String extractContent(JsonNode contentNode) {

@@ -5,6 +5,7 @@ import org.slf4j.LoggerFactory;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Map.Entry;
 
 /**
  * MVP inspector: logs conversation content and always allows.
@@ -20,6 +21,22 @@ public final class LoggingInspector implements ChatRequestInspector {
                 .append(" path=").append(ctx.getPath())
                 .append(" model=").append(ctx.getModel())
                 .append(" stream=").append(ctx.isStream());
+        
+        // Log headers
+        Map<String, String> headers = ctx.getHeaders();
+        if (!headers.isEmpty()) {
+            sb.append(" headers={");
+            int i = 0;
+            for (Map.Entry<String, String> entry : headers.entrySet()) {
+                if (i > 0) {
+                    sb.append(", ");
+                }
+                sb.append(entry.getKey()).append("=").append(entry.getValue());
+                i++;
+            }
+            sb.append('}');
+        }
+        
         if (ctx.getPrompt() != null && !ctx.getPrompt().isEmpty()) {
             sb.append(" prompt=").append(ctx.getPrompt());
         }

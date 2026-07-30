@@ -20,11 +20,12 @@ public final class ChatRequestContext {
     private final String prompt;
     private final boolean stream;
     private final JsonNode rawBody;
+    private final Map<String, String> headers;
     private final Map<String, Object> attributes;
 
     public ChatRequestContext(String requestId, String path, String model,
                               List<Map<String, String>> messages, String prompt,
-                              boolean stream, JsonNode rawBody) {
+                              boolean stream, JsonNode rawBody, Map<String, String> headers) {
         this.requestId = requestId;
         this.path = path;
         this.model = model;
@@ -34,6 +35,9 @@ public final class ChatRequestContext {
         this.prompt = prompt;
         this.stream = stream;
         this.rawBody = rawBody;
+        this.headers = headers == null
+                ? Collections.<String, String>emptyMap()
+                : Collections.unmodifiableMap(headers);
         this.attributes = new HashMap<String, Object>();
     }
 
@@ -67,5 +71,13 @@ public final class ChatRequestContext {
 
     public Map<String, Object> getAttributes() {
         return attributes;
+    }
+
+    public Map<String, String> getHeaders() {
+        return headers;
+    }
+
+    public String getHeader(String name) {
+        return headers.get(name);
     }
 }
