@@ -1,0 +1,8 @@
+gateway.port=8088
+vllm.host=127.0.0.1
+vllm.port=8000
+gateway.maxContentLength=10485760
+gateway.path.whitelist=/v1/chat/completions,/v1/completions,/v1/usage,/v1/admin/usage
+gateway.sqlite.path=/app/data/gateway.db
+gateway.admin.username=admin
+gateway.admin.password=admin123

@@ -1,0 +1,32 @@
+@import "tailwindcss";
+
+@theme {
+  --color-border: hsl(var(--border));
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-card: hsl(var(--card));
+  --radius-lg: var(--radius);
+}
+
+:root {
+  --background: 210 35% 97%;
+  --foreground: 222 18% 18%;
+  --card: 210 30% 98%;
+  --primary: 210 92% 56%;
+  --primary-foreground: 210 40% 98%;
+  --muted: 210 28% 95%;
+  --muted-foreground: 220 12% 46%;
+  --border: 215 22% 87%;
+  --radius: 0.9rem;
+}
+
+body {
+  margin: 0;
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}

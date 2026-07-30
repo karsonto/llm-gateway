@@ -1,0 +1,17 @@
+target/
+.git/
+.idea/
+.vscode/
+*.iml
+.DS_Store
+
+admin-web/node_modules/
+admin-web/.npm-cache/
+admin-web/dist/
+
+data/
+.data/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm

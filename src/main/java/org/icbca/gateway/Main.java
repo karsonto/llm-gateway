@@ -1,5 +1,6 @@
 package org.icbca.gateway;
 
+import org.icbca.gateway.admin.AdminSessionStore;
 import org.icbca.gateway.auth.ApiKeyStore;
 import org.icbca.gateway.auth.AuthInspector;
 import org.icbca.gateway.auth.InMemoryApiKeyStore;
@@ -20,7 +21,6 @@ import java.util.List;
 
 /**
  * Entry point: load config, register default inspectors, start Netty gateway.
- * To add guardrails later: implement ChatRequestInspector and append to the list below.
  */
 public final class Main {
 
@@ -33,6 +33,7 @@ public final class Main {
         final SqliteDatabase sqliteDb;
         final ApiKeyStore apiKeyStore;
         final UsageRecorder usageRecorder;
+        final AdminSessionStore adminSessions = new AdminSessionStore();
 
         if (config.isSqliteEnabled()) {
             sqliteDb = SqliteDatabase.open(config.getSqlitePath());
@@ -43,7 +44,7 @@ public final class Main {
             sqliteDb = null;
             apiKeyStore = new InMemoryApiKeyStore(config);
             usageRecorder = new InMemoryUsageRecorder(apiKeyStore);
-            log.info("Storage: in-memory (optional gateway.api.keys)");
+            log.info("Storage: in-memory (admin console requires SQLite)");
         }
 
         log.info("API key auth {}", apiKeyStore.isAuthRequired() ? "enabled" : "open (no keys configured)");
@@ -51,10 +52,10 @@ public final class Main {
         List<ChatRequestInspector> inspectors = new ArrayList<ChatRequestInspector>();
         inspectors.add(new AuthInspector(apiKeyStore));
         inspectors.add(new LoggingInspector());
-        // Future guardrails: inspectors.add(new XxxGuardrailInspector(...));
         InspectorPipeline pipeline = new InspectorPipeline(inspectors);
 
-        final GatewayServer server = new GatewayServer(config, pipeline, apiKeyStore, usageRecorder);
+        final GatewayServer server = new GatewayServer(
+                config, pipeline, apiKeyStore, usageRecorder, sqliteDb, adminSessions);
         Runtime.getRuntime().addShutdownHook(new Thread(new Runnable() {
             @Override
             public void run() {

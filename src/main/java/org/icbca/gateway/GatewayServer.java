@@ -10,10 +10,16 @@ import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
 import io.netty.handler.codec.http.HttpObjectAggregator;
 import io.netty.handler.codec.http.HttpServerCodec;
+import org.icbca.gateway.admin.AdminSessionStore;
+import org.icbca.gateway.admin.AdminUsageQuery;
 import org.icbca.gateway.auth.ApiKeyStore;
+import org.icbca.gateway.auth.SqliteApiKeyStore;
 import org.icbca.gateway.config.GatewayConfig;
+import org.icbca.gateway.db.SqliteDatabase;
+import org.icbca.gateway.handler.AdminApiHandler;
 import org.icbca.gateway.handler.GatewayInboundHandler;
 import org.icbca.gateway.handler.PathWhitelistHandler;
+import org.icbca.gateway.handler.StaticAdminHandler;
 import org.icbca.gateway.handler.UsageQueryHandler;
 import org.icbca.gateway.inspect.InspectorPipeline;
 import org.icbca.gateway.proxy.UpstreamClient;
@@ -32,22 +38,31 @@ public final class GatewayServer {
     private final InspectorPipeline inspectorPipeline;
     private final ApiKeyStore apiKeyStore;
     private final UsageRecorder usageRecorder;
+    private final SqliteDatabase sqliteDb;
+    private final AdminSessionStore adminSessions;
     private EventLoopGroup bossGroup;
     private EventLoopGroup workerGroup;
     private Channel serverChannel;
 
     public GatewayServer(GatewayConfig config, InspectorPipeline inspectorPipeline,
-                         ApiKeyStore apiKeyStore, UsageRecorder usageRecorder) {
+                         ApiKeyStore apiKeyStore, UsageRecorder usageRecorder,
+                         SqliteDatabase sqliteDb, AdminSessionStore adminSessions) {
         this.config = config;
         this.inspectorPipeline = inspectorPipeline;
         this.apiKeyStore = apiKeyStore;
         this.usageRecorder = usageRecorder;
+        this.sqliteDb = sqliteDb;
+        this.adminSessions = adminSessions != null ? adminSessions : new AdminSessionStore();
     }
 
     public void start() throws InterruptedException {
         bossGroup = new NioEventLoopGroup(1);
         workerGroup = new NioEventLoopGroup();
         final UpstreamClient upstreamClient = new UpstreamClient(config, usageRecorder);
+
+        final SqliteApiKeyStore sqliteKeys = apiKeyStore instanceof SqliteApiKeyStore
+                ? (SqliteApiKeyStore) apiKeyStore : null;
+        final AdminUsageQuery usageQuery = sqliteDb != null ? new AdminUsageQuery(sqliteDb) : null;
 
         ServerBootstrap bootstrap = new ServerBootstrap();
         bootstrap.group(bossGroup, workerGroup)
@@ -61,6 +76,8 @@ public final class GatewayServer {
                         ch.pipeline()
                                 .addLast(new HttpServerCodec())
                                 .addLast(new HttpObjectAggregator(config.getMaxContentLength()))
+                                .addLast(new AdminApiHandler(config, adminSessions, sqliteKeys, usageQuery))
+                                .addLast(new StaticAdminHandler())
                                 .addLast(new PathWhitelistHandler(config))
                                 .addLast(new UsageQueryHandler(apiKeyStore, usageRecorder))
                                 .addLast(new GatewayInboundHandler(upstreamClient, inspectorPipeline));
@@ -68,7 +85,7 @@ public final class GatewayServer {
                 });
 
         serverChannel = bootstrap.bind(config.getPort()).sync().channel();
-        log.info("Gateway listening on port {}, upstream {}:{}, whitelist={}, authRequired={}",
+        log.info("Gateway listening on port {}, upstream {}:{}, whitelist={}, authRequired={}, admin=/admin/",
                 config.getPort(), config.getVllmHost(), config.getVllmPort(),
                 config.getPathWhitelist(), apiKeyStore.isAuthRequired());
     }

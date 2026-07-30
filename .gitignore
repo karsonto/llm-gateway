@@ -40,3 +40,8 @@ build/
 *.db-journal
 *.db-wal
 *.db-shm
+
+### Admin web ###
+admin-web/node_modules/
+admin-web/.npm-cache/
+admin-web/dist/
