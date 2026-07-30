@@ -105,3 +105,7 @@ export const fetchUsageByGroup = (groupName: string, from?: string, to?: string)
   if (to) q.set("to", to);
   return api<UsageChartResponse>(`/usage/by-group?${q}`);
 };
+
+/** All keys aggregated; reuses by-group without group filter. */
+export const fetchUsageAll = (from?: string, to?: string) =>
+  fetchUsageByGroup("", from, to);

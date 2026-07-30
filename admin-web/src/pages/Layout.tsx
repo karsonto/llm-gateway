@@ -1,11 +1,10 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
-import { KeyRound, BarChart3, Users, LogOut } from "lucide-react";
+import { KeyRound, BarChart3, LogOut } from "lucide-react";
 import { logout, setToken } from "../api";
 
 const nav = [
   { to: "/keys", label: "API Keys", icon: KeyRound },
-  { to: "/usage/key", label: "按 Key 用量", icon: BarChart3 },
-  { to: "/usage/group", label: "按组别用量", icon: Users },
+  { to: "/usage", label: "用量查询", icon: BarChart3 },
 ];
 
 export default function Layout() {

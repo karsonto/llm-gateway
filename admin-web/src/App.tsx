@@ -3,8 +3,7 @@ import { getToken } from "./api";
 import LoginPage from "./pages/LoginPage";
 import Layout from "./pages/Layout";
 import KeysPage from "./pages/KeysPage";
-import UsageByKeyPage from "./pages/UsageByKeyPage";
-import UsageByGroupPage from "./pages/UsageByGroupPage";
+import UsagePage from "./pages/UsagePage";
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   if (!getToken()) return <Navigate to="/login" replace />;
@@ -25,8 +24,9 @@ export default function App() {
       >
         <Route index element={<Navigate to="/keys" replace />} />
         <Route path="keys" element={<KeysPage />} />
-        <Route path="usage/key" element={<UsageByKeyPage />} />
-        <Route path="usage/group" element={<UsageByGroupPage />} />
+        <Route path="usage" element={<UsagePage />} />
+        <Route path="usage/key" element={<Navigate to="/usage" replace />} />
+        <Route path="usage/group" element={<Navigate to="/usage" replace />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
