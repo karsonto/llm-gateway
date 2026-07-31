@@ -45,3 +45,6 @@ build/
 admin-web/node_modules/
 admin-web/.npm-cache/
 admin-web/dist/
+
+### Runtime logs ###
+logs/

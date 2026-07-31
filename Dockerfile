@@ -42,7 +42,7 @@ WORKDIR /app
 
 RUN groupadd --system gateway \
     && useradd --system --gid gateway --home-dir /app --no-create-home gateway \
-    && mkdir -p /app/data /app/config \
+    && mkdir -p /app/data /app/config /app/logs \
     && chown -R gateway:gateway /app
 
 COPY --from=java-builder --chown=gateway:gateway /build/target/llm-gateway-1.0-SNAPSHOT.jar /app/app.jar
@@ -54,7 +54,7 @@ EXPOSE 8088
 
 # Mount host config: -v /host/config/gateway.properties:/app/config/gateway.properties
 ENV GATEWAY_CONFIG=/app/config/gateway.properties
-VOLUME ["/app/data", "/app/config"]
+VOLUME ["/app/data", "/app/config", "/app/logs"]
 
 ENV JAVA_OPTS=""
 

@@ -8,6 +8,7 @@ import org.icbca.gateway.auth.SqliteApiKeyStore;
 import org.icbca.gateway.config.GatewayConfig;
 import org.icbca.gateway.db.SqliteDatabase;
 import org.icbca.gateway.inspect.ChatRequestInspector;
+import org.icbca.gateway.inspect.ClassificationInspector;
 import org.icbca.gateway.inspect.InspectorPipeline;
 import org.icbca.gateway.inspect.LoggingInspector;
 import org.icbca.gateway.usage.InMemoryUsageRecorder;
@@ -51,6 +52,7 @@ public final class Main {
 
         List<ChatRequestInspector> inspectors = new ArrayList<ChatRequestInspector>();
         inspectors.add(new AuthInspector(apiKeyStore));
+        inspectors.add(new ClassificationInspector());
         inspectors.add(new LoggingInspector());
         InspectorPipeline pipeline = new InspectorPipeline(inspectors);
 
