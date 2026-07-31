@@ -20,6 +20,9 @@ export default function KeysPage() {
   const [groupName, setGroupName] = useState("default");
   const [customKey, setCustomKey] = useState("");
   const [enabled, setEnabled] = useState(true);
+  const [editing, setEditing] = useState<ApiKeyRow | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editGroupName, setEditGroupName] = useState("default");
 
   useEffect(() => {
     fetchGroups()
@@ -88,6 +91,31 @@ export default function KeysPage() {
     try {
       await updateKey({ api_key: row.api_key, enabled: !row.enabled });
       await load(page);
+    } catch (err: any) {
+      setError(err?.message || "更新失败");
+    }
+  }
+
+  function openEdit(row: ApiKeyRow) {
+    setEditing(row);
+    setEditName(row.name);
+    setEditGroupName(row.group_name || "default");
+    setError("");
+  }
+
+  async function onUpdate(e: FormEvent) {
+    e.preventDefault();
+    if (!editing) return;
+    setError("");
+    try {
+      await updateKey({
+        api_key: editing.api_key,
+        name: editName.trim() || "unnamed",
+        group_name: editGroupName.trim() || "default",
+      });
+      setEditing(null);
+      await load(page);
+      fetchGroups().then(setGroups).catch(() => {});
     } catch (err: any) {
       setError(err?.message || "更新失败");
     }
@@ -208,12 +236,20 @@ export default function KeysPage() {
                     </span>
                   </td>
                   <td className="px-4 py-3">
-                    <button
-                      onClick={() => toggleEnabled(row)}
-                      className="text-sky-600 hover:underline text-xs"
-                    >
-                      {row.enabled ? "禁用" : "启用"}
-                    </button>
+                    <div className="flex items-center gap-3">
+                      <button
+                        onClick={() => openEdit(row)}
+                        className="text-sky-600 hover:underline text-xs"
+                      >
+                        编辑
+                      </button>
+                      <button
+                        onClick={() => toggleEnabled(row)}
+                        className="text-sky-600 hover:underline text-xs"
+                      >
+                        {row.enabled ? "禁用" : "启用"}
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))
@@ -292,6 +328,54 @@ export default function KeysPage() {
               </button>
               <button type="submit" className="h-9 px-3 rounded-lg bg-sky-500 text-white text-sm">
                 创建
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {editing && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
+          <form
+            onSubmit={onUpdate}
+            className="w-full max-w-md rounded-xl bg-white border border-slate-200 shadow-lg p-5 space-y-4"
+          >
+            <h2 className="text-lg font-semibold text-slate-800">编辑 API Key</h2>
+            <div className="space-y-2">
+              <label className="text-sm text-slate-600">API Key</label>
+              <div className="w-full h-10 px-3 rounded-lg border border-slate-200 bg-slate-50 font-mono text-xs text-slate-700 flex items-center overflow-x-auto">
+                {editing.api_key}
+              </div>
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm text-slate-600">名称</label>
+              <input
+                className="w-full h-10 px-3 rounded-lg border border-slate-200"
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                placeholder="alice"
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm text-slate-600">组别 group_name</label>
+              <input
+                className="w-full h-10 px-3 rounded-lg border border-slate-200"
+                value={editGroupName}
+                onChange={(e) => setEditGroupName(e.target.value)}
+                placeholder="default"
+              />
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setEditing(null)}
+                className="h-9 px-3 rounded-lg border border-slate-200 text-sm"
+              >
+                取消
+              </button>
+              <button type="submit" className="h-9 px-3 rounded-lg bg-sky-500 text-white text-sm">
+                保存
               </button>
             </div>
           </form>
