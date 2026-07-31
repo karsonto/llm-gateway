@@ -17,6 +17,7 @@ import org.icbca.gateway.auth.SqliteApiKeyStore;
 import org.icbca.gateway.config.GatewayConfig;
 import org.icbca.gateway.db.SqliteDatabase;
 import org.icbca.gateway.handler.AdminApiHandler;
+import org.icbca.gateway.handler.CorsHandler;
 import org.icbca.gateway.handler.GatewayInboundHandler;
 import org.icbca.gateway.handler.PathWhitelistHandler;
 import org.icbca.gateway.handler.StaticAdminHandler;
@@ -76,6 +77,7 @@ public final class GatewayServer {
                         ch.pipeline()
                                 .addLast(new HttpServerCodec())
                                 .addLast(new HttpObjectAggregator(config.getMaxContentLength()))
+                                .addLast(new CorsHandler())
                                 .addLast(new AdminApiHandler(config, adminSessions, sqliteKeys, usageQuery))
                                 .addLast(new StaticAdminHandler())
                                 .addLast(new PathWhitelistHandler(config))
