@@ -142,6 +142,129 @@ public final class SqliteApiKeyStore implements ApiKeyStore {
     }
 
     /**
+     * Paginated list with optional filters.
+     *
+     * @param q       fuzzy match on name or api_key (null/blank = no filter)
+     * @param group   exact group_name (null/blank = no filter)
+     * @param enabled null = no filter; otherwise filter by enabled flag
+     */
+    public List<ApiKeyInfo> listPage(final String q, final String group, final Boolean enabled,
+                                     final int offset, final int limit) {
+        try {
+            return db.withConnection(new SqliteDatabase.SqlWork<List<ApiKeyInfo>>() {
+                @Override
+                public List<ApiKeyInfo> run(java.sql.Connection connection) throws SQLException {
+                    StringBuilder sql = new StringBuilder(
+                            "SELECT api_key, name, group_name, enabled FROM api_keys");
+                    List<Object> params = new ArrayList<Object>();
+                    appendFilters(sql, params, q, group, enabled);
+                    sql.append(" ORDER BY id LIMIT ? OFFSET ?");
+                    params.add(Integer.valueOf(limit));
+                    params.add(Integer.valueOf(offset));
+
+                    PreparedStatement ps = connection.prepareStatement(sql.toString());
+                    try {
+                        bindParams(ps, params);
+                        ResultSet rs = ps.executeQuery();
+                        try {
+                            List<ApiKeyInfo> list = new ArrayList<ApiKeyInfo>();
+                            while (rs.next()) {
+                                list.add(new ApiKeyInfo(
+                                        rs.getString("api_key"),
+                                        rs.getString("name"),
+                                        rs.getString("group_name"),
+                                        rs.getInt("enabled") != 0));
+                            }
+                            return list;
+                        } finally {
+                            rs.close();
+                        }
+                    } finally {
+                        ps.close();
+                    }
+                }
+            });
+        } catch (SQLException e) {
+            log.warn("listPage keys failed: {}", e.getMessage());
+            return Collections.emptyList();
+        }
+    }
+
+    public int countPage(final String q, final String group, final Boolean enabled) {
+        try {
+            return db.withConnection(new SqliteDatabase.SqlWork<Integer>() {
+                @Override
+                public Integer run(java.sql.Connection connection) throws SQLException {
+                    StringBuilder sql = new StringBuilder("SELECT COUNT(*) FROM api_keys");
+                    List<Object> params = new ArrayList<Object>();
+                    appendFilters(sql, params, q, group, enabled);
+                    PreparedStatement ps = connection.prepareStatement(sql.toString());
+                    try {
+                        bindParams(ps, params);
+                        ResultSet rs = ps.executeQuery();
+                        try {
+                            if (rs.next()) {
+                                return Integer.valueOf(rs.getInt(1));
+                            }
+                            return Integer.valueOf(0);
+                        } finally {
+                            rs.close();
+                        }
+                    } finally {
+                        ps.close();
+                    }
+                }
+            }).intValue();
+        } catch (SQLException e) {
+            log.warn("countPage keys failed: {}", e.getMessage());
+            return 0;
+        }
+    }
+
+    private static void appendFilters(StringBuilder sql, List<Object> params,
+                                      String q, String group, Boolean enabled) {
+        List<String> clauses = new ArrayList<String>();
+        if (q != null && !q.trim().isEmpty()) {
+            String like = "%" + escapeLike(q.trim()) + "%";
+            clauses.add("(name LIKE ? ESCAPE '\\' OR api_key LIKE ? ESCAPE '\\')");
+            params.add(like);
+            params.add(like);
+        }
+        if (group != null && !group.trim().isEmpty()) {
+            clauses.add("group_name = ?");
+            params.add(group.trim());
+        }
+        if (enabled != null) {
+            clauses.add("enabled = ?");
+            params.add(Integer.valueOf(enabled.booleanValue() ? 1 : 0));
+        }
+        if (!clauses.isEmpty()) {
+            sql.append(" WHERE ");
+            for (int i = 0; i < clauses.size(); i++) {
+                if (i > 0) {
+                    sql.append(" AND ");
+                }
+                sql.append(clauses.get(i));
+            }
+        }
+    }
+
+    private static void bindParams(PreparedStatement ps, List<Object> params) throws SQLException {
+        for (int i = 0; i < params.size(); i++) {
+            Object p = params.get(i);
+            if (p instanceof Integer) {
+                ps.setInt(i + 1, ((Integer) p).intValue());
+            } else {
+                ps.setString(i + 1, String.valueOf(p));
+            }
+        }
+    }
+
+    private static String escapeLike(String raw) {
+        return raw.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_");
+    }
+
+    /**
      * Insert a new API key. If {@code apiKey} is null/blank, generates {@code sk-} + random.
      */
     public ApiKeyInfo create(String apiKey, String name, String groupName, boolean enabled)

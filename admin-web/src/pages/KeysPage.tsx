@@ -1,9 +1,18 @@
 import { FormEvent, useEffect, useState } from "react";
 import { Plus, RefreshCw } from "lucide-react";
-import { ApiKeyRow, createKey, fetchKeys, updateKey } from "../api";
+import { ApiKeyRow, createKey, fetchGroups, fetchKeys, updateKey } from "../api";
+
+const PAGE_SIZE = 20;
 
 export default function KeysPage() {
   const [rows, setRows] = useState<ApiKeyRow[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [qInput, setQInput] = useState("");
+  const [q, setQ] = useState("");
+  const [group, setGroup] = useState("");
+  const [enabledFilter, setEnabledFilter] = useState<"all" | "1" | "0">("all");
+  const [groups, setGroups] = useState<string[]>([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
@@ -12,11 +21,34 @@ export default function KeysPage() {
   const [customKey, setCustomKey] = useState("");
   const [enabled, setEnabled] = useState(true);
 
-  async function load() {
+  useEffect(() => {
+    fetchGroups()
+      .then(setGroups)
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    const t = window.setTimeout(() => {
+      setQ(qInput.trim());
+      setPage(1);
+    }, 300);
+    return () => window.clearTimeout(t);
+  }, [qInput]);
+
+  async function load(targetPage = page) {
     setLoading(true);
     setError("");
     try {
-      setRows(await fetchKeys());
+      const res = await fetchKeys({
+        q: q || undefined,
+        group: group || undefined,
+        enabled: enabledFilter === "all" ? undefined : enabledFilter === "1",
+        page: targetPage,
+        page_size: PAGE_SIZE,
+      });
+      setRows(res.items || []);
+      setTotal(res.total || 0);
+      setPage(res.page || targetPage);
     } catch (e: any) {
       setError(e?.message || "加载失败");
     } finally {
@@ -25,8 +57,9 @@ export default function KeysPage() {
   }
 
   useEffect(() => {
-    load();
-  }, []);
+    load(page);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q, group, enabledFilter, page]);
 
   async function onCreate(e: FormEvent) {
     e.preventDefault();
@@ -43,7 +76,9 @@ export default function KeysPage() {
       setGroupName("default");
       setCustomKey("");
       setEnabled(true);
-      await load();
+      if (page !== 1) setPage(1);
+      else await load(1);
+      fetchGroups().then(setGroups).catch(() => {});
     } catch (err: any) {
       setError(err?.message || "创建失败");
     }
@@ -52,11 +87,13 @@ export default function KeysPage() {
   async function toggleEnabled(row: ApiKeyRow) {
     try {
       await updateKey({ api_key: row.api_key, enabled: !row.enabled });
-      await load();
+      await load(page);
     } catch (err: any) {
       setError(err?.message || "更新失败");
     }
   }
+
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   return (
     <div className="space-y-4">
@@ -67,7 +104,7 @@ export default function KeysPage() {
         </div>
         <div className="flex gap-2">
           <button
-            onClick={load}
+            onClick={() => load(page)}
             className="h-9 px-3 rounded-lg border border-slate-200 bg-white text-sm text-slate-600 hover:bg-slate-50 inline-flex items-center gap-1"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
@@ -79,6 +116,51 @@ export default function KeysPage() {
           >
             <Plus className="w-3.5 h-3.5" /> 新增
           </button>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap gap-3 items-end rounded-xl border border-slate-200 bg-white p-4">
+        <div className="space-y-1 flex-1 min-w-[180px]">
+          <label className="text-xs text-slate-500">搜索</label>
+          <input
+            className="h-9 w-full px-3 rounded-lg border border-slate-200 text-sm"
+            value={qInput}
+            onChange={(e) => setQInput(e.target.value)}
+            placeholder="名称或 API Key"
+          />
+        </div>
+        <div className="space-y-1">
+          <label className="text-xs text-slate-500">组别</label>
+          <select
+            className="h-9 min-w-[140px] px-2 rounded-lg border border-slate-200 text-sm"
+            value={group}
+            onChange={(e) => {
+              setGroup(e.target.value);
+              setPage(1);
+            }}
+          >
+            <option value="">全部</option>
+            {groups.map((g) => (
+              <option key={g} value={g}>
+                {g}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="space-y-1">
+          <label className="text-xs text-slate-500">状态</label>
+          <select
+            className="h-9 min-w-[100px] px-2 rounded-lg border border-slate-200 text-sm"
+            value={enabledFilter}
+            onChange={(e) => {
+              setEnabledFilter(e.target.value as "all" | "1" | "0");
+              setPage(1);
+            }}
+          >
+            <option value="all">全部</option>
+            <option value="1">启用</option>
+            <option value="0">禁用</option>
+          </select>
         </div>
       </div>
 
@@ -103,7 +185,7 @@ export default function KeysPage() {
             {rows.length === 0 ? (
               <tr>
                 <td colSpan={5} className="px-4 py-10 text-center text-slate-400">
-                  暂无 Key，点击右上角新增
+                  {loading ? "加载中…" : "暂无 Key，点击右上角新增或调整筛选条件"}
                 </td>
               </tr>
             ) : (
@@ -138,6 +220,27 @@ export default function KeysPage() {
             )}
           </tbody>
         </table>
+        <div className="flex items-center justify-between px-4 py-3 border-t border-slate-100 text-sm text-slate-500">
+          <span>
+            共 {total} 条 · 第 {page}/{totalPages} 页
+          </span>
+          <div className="flex gap-2">
+            <button
+              disabled={page <= 1 || loading}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              className="h-8 px-3 rounded-lg border border-slate-200 bg-white disabled:opacity-40"
+            >
+              上一页
+            </button>
+            <button
+              disabled={page >= totalPages || loading}
+              onClick={() => setPage((p) => p + 1)}
+              className="h-8 px-3 rounded-lg border border-slate-200 bg-white disabled:opacity-40"
+            >
+              下一页
+            </button>
+          </div>
+        </div>
       </div>
 
       {open && (

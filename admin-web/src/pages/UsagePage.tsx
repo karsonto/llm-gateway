@@ -38,8 +38,9 @@ export default function UsagePage() {
     setBlocks([]);
     setError("");
     if (dimension === "name") {
-      fetchKeys()
-        .then((list) => {
+      fetchKeys({ page: 1, page_size: 100 })
+        .then((res) => {
+          const list = res.items || [];
           setKeys(list);
           setApiKey(list.length ? list[0].api_key : "");
         })

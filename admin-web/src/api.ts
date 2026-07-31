@@ -5,6 +5,13 @@ export type ApiKeyRow = {
   enabled: boolean;
 };
 
+export type KeysPageResult = {
+  total: number;
+  page: number;
+  page_size: number;
+  items: ApiKeyRow[];
+};
+
 export type UsagePoint = {
   date: string;
   requests: number;
@@ -65,7 +72,22 @@ export const login = (username: string, password: string) =>
 
 export const logout = () => api<{ ok: boolean }>("/logout", { method: "POST" });
 
-export const fetchKeys = () => api<ApiKeyRow[]>("/keys");
+export const fetchKeys = (params?: {
+  q?: string;
+  group?: string;
+  enabled?: boolean;
+  page?: number;
+  page_size?: number;
+}) => {
+  const q = new URLSearchParams();
+  if (params?.q) q.set("q", params.q);
+  if (params?.group) q.set("group", params.group);
+  if (params?.enabled !== undefined) q.set("enabled", params.enabled ? "1" : "0");
+  if (params?.page !== undefined) q.set("page", String(params.page));
+  if (params?.page_size !== undefined) q.set("page_size", String(params.page_size));
+  const qs = q.toString();
+  return api<KeysPageResult>(qs ? `/keys?${qs}` : "/keys");
+};
 
 export const createKey = (body: {
   api_key?: string;

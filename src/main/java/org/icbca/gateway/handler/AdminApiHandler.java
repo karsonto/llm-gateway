@@ -95,7 +95,7 @@ public final class AdminApiHandler extends SimpleChannelInboundHandler<FullHttpR
                     return;
                 }
                 if (HttpMethod.GET.equals(request.method())) {
-                    writeJson(ctx, HttpResponseStatus.OK, keysToJson(sqliteKeyStore.list()));
+                    writeJson(ctx, HttpResponseStatus.OK, keysPageJson(request.uri()));
                     return;
                 }
                 if (HttpMethod.POST.equals(request.method())) {
@@ -263,6 +263,61 @@ public final class AdminApiHandler extends SimpleChannelInboundHandler<FullHttpR
             return java.net.URLDecoder.decode(s, "UTF-8");
         } catch (Exception e) {
             return s;
+        }
+    }
+
+    private String keysPageJson(String uri) {
+        Map<String, String> q = parseQuery(uri);
+        String search = blankToNull(q.get("q"));
+        String group = blankToNull(q.get("group"));
+        Boolean enabled = parseEnabled(q.get("enabled"));
+        int page = parsePositiveInt(q.get("page"), 1);
+        int pageSize = parsePositiveInt(q.get("page_size"), 20);
+        if (pageSize > 100) {
+            pageSize = 100;
+        }
+        int offset = (page - 1) * pageSize;
+        int total = sqliteKeyStore.countPage(search, group, enabled);
+        List<ApiKeyInfo> items = sqliteKeyStore.listPage(search, group, enabled, offset, pageSize);
+        StringBuilder sb = new StringBuilder(256);
+        sb.append("{\"total\":").append(total)
+                .append(",\"page\":").append(page)
+                .append(",\"page_size\":").append(pageSize)
+                .append(",\"items\":").append(keysToJson(items))
+                .append('}');
+        return sb.toString();
+    }
+
+    private static String blankToNull(String s) {
+        if (s == null || s.trim().isEmpty()) {
+            return null;
+        }
+        return s.trim();
+    }
+
+    private static Boolean parseEnabled(String raw) {
+        if (raw == null || raw.trim().isEmpty()) {
+            return null;
+        }
+        String v = raw.trim();
+        if ("1".equals(v) || "true".equalsIgnoreCase(v)) {
+            return Boolean.TRUE;
+        }
+        if ("0".equals(v) || "false".equalsIgnoreCase(v)) {
+            return Boolean.FALSE;
+        }
+        return null;
+    }
+
+    private static int parsePositiveInt(String raw, int defaultValue) {
+        if (raw == null || raw.trim().isEmpty()) {
+            return defaultValue;
+        }
+        try {
+            int n = Integer.parseInt(raw.trim());
+            return n < 1 ? defaultValue : n;
+        } catch (NumberFormatException e) {
+            return defaultValue;
         }
     }
 
