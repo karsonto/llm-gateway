@@ -11,6 +11,7 @@ import org.icbca.gateway.inspect.ChatRequestInspector;
 import org.icbca.gateway.inspect.ClassificationInspector;
 import org.icbca.gateway.inspect.InspectorPipeline;
 import org.icbca.gateway.inspect.LoggingInspector;
+import org.icbca.gateway.inspect.UserPromptCsvCollector;
 import org.icbca.gateway.usage.InMemoryUsageRecorder;
 import org.icbca.gateway.usage.SqliteUsageRecorder;
 import org.icbca.gateway.usage.UsageRecorder;
@@ -50,9 +51,15 @@ public final class Main {
 
         log.info("API key auth {}", apiKeyStore.isAuthRequired() ? "enabled" : "open (no keys configured)");
 
+        UserPromptCsvCollector csvCollector = null;
+        if (config.isClassificationCollectEnabled()) {
+            csvCollector = new UserPromptCsvCollector(config.getClassificationCollectCsv());
+            log.info("User prompt CSV collect: {}", config.getClassificationCollectCsv());
+        }
+
         List<ChatRequestInspector> inspectors = new ArrayList<ChatRequestInspector>();
         inspectors.add(new AuthInspector(apiKeyStore));
-        inspectors.add(new ClassificationInspector());
+        inspectors.add(new ClassificationInspector(csvCollector));
         inspectors.add(new LoggingInspector());
         InspectorPipeline pipeline = new InspectorPipeline(inspectors);
 

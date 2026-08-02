@@ -36,11 +36,13 @@ public final class GatewayConfig {
     private final String sqlitePath;
     private final String adminUsername;
     private final String adminPassword;
+    private final String classificationCollectCsv;
     private final String configSource;
 
     public GatewayConfig(int port, String vllmHost, int vllmPort, int maxContentLength,
                          Set<String> pathWhitelist, Map<String, String> apiKeys, String sqlitePath,
-                         String adminUsername, String adminPassword, String configSource) {
+                         String adminUsername, String adminPassword, String classificationCollectCsv,
+                         String configSource) {
         this.port = port;
         this.vllmHost = vllmHost;
         this.vllmPort = vllmPort;
@@ -52,6 +54,8 @@ public final class GatewayConfig {
                 ? "admin" : adminUsername.trim();
         this.adminPassword = adminPassword == null || adminPassword.isEmpty()
                 ? "admin123" : adminPassword;
+        this.classificationCollectCsv = classificationCollectCsv == null
+                ? "" : classificationCollectCsv.trim();
         this.configSource = configSource == null ? "classpath:gateway.properties" : configSource;
     }
 
@@ -147,8 +151,10 @@ public final class GatewayConfig {
         String sqlitePath = props.getProperty("gateway.sqlite.path", "").trim();
         String adminUsername = props.getProperty("gateway.admin.username", "admin").trim();
         String adminPassword = props.getProperty("gateway.admin.password", "admin123");
+        String classificationCollectCsv =
+                props.getProperty("classification.collect.csv", "").trim();
         return new GatewayConfig(port, vllmHost, vllmPort, maxContentLength, whitelist, apiKeys,
-                sqlitePath, adminUsername, adminPassword, configSource);
+                sqlitePath, adminUsername, adminPassword, classificationCollectCsv, configSource);
     }
 
     static Map<String, String> parseApiKeys(String raw) {
@@ -223,6 +229,14 @@ public final class GatewayConfig {
         return adminPassword;
     }
 
+    public String getClassificationCollectCsv() {
+        return classificationCollectCsv;
+    }
+
+    public boolean isClassificationCollectEnabled() {
+        return classificationCollectCsv != null && !classificationCollectCsv.isEmpty();
+    }
+
     public String getConfigSource() {
         return configSource;
     }
@@ -235,6 +249,8 @@ public final class GatewayConfig {
                 + ", pathWhitelist=" + Arrays.toString(pathWhitelist.toArray())
                 + ", sqlitePath=" + (sqlitePath.isEmpty() ? "(none)" : sqlitePath)
                 + ", adminUsername=" + adminUsername
+                + ", classificationCollectCsv="
+                + (classificationCollectCsv.isEmpty() ? "(none)" : classificationCollectCsv)
                 + ", configSource=" + configSource
                 + ", apiKeysConfigured=" + !apiKeys.isEmpty()
                 + ", apiKeyCount=" + apiKeys.size()

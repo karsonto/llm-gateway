@@ -1,13 +1,11 @@
 package org.icbca.gateway.inspect;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
 /**
- * Extracts the latest user question for future classification.
+ * Flattens all role=user texts for future classification; optionally appends to CSV.
  * No real model yet: stores placeholders and always allows.
  */
 public final class ClassificationInspector implements ChatRequestInspector {
@@ -16,62 +14,68 @@ public final class ClassificationInspector implements ChatRequestInspector {
     public static final String ATTR_CATEGORY = "category";
 
     private static final String CATEGORY_PLACEHOLDER = "unclassified";
-    private static final int LOG_TEXT_MAX = 200;
+    private static final String USER_SEP = "\n\n";
 
-    private static final Logger CLASSIFY_LOG =
-            LoggerFactory.getLogger("org.icbca.gateway.classification");
+    private final UserPromptCsvCollector csvCollector;
+
+    public ClassificationInspector(UserPromptCsvCollector csvCollector) {
+        this.csvCollector = csvCollector;
+    }
 
     @Override
     public InspectionResult inspect(ChatRequestContext ctx) {
-        String userText = extractUserText(ctx);
-        if (userText == null) {
-            userText = "";
-        }
-        if (userText.isEmpty()) {
-            CLASSIFY_LOG.warn("requestId={} classification: empty user text (path={})",
-                    ctx.getRequestId(), ctx.getPath());
-        }
-
+        String userText = flattenUserTexts(ctx);
         ctx.getAttributes().put(ATTR_USER_TEXT, userText);
         ctx.getAttributes().put(ATTR_CATEGORY, CATEGORY_PLACEHOLDER);
 
-        CLASSIFY_LOG.info("requestId={} classification category={} userText={}",
-                ctx.getRequestId(), CATEGORY_PLACEHOLDER, truncateForLog(userText));
+        if (csvCollector != null && !userText.isEmpty()) {
+            csvCollector.append(userText);
+        }
         return InspectionResult.allow();
     }
 
     /**
-     * Prefer last {@code role=user} message content; otherwise use completions {@code prompt}.
+     * All {@code role=user} contents joined by {@code \\n\\n}; otherwise completions {@code prompt}.
      */
-    public static String extractUserText(ChatRequestContext ctx) {
+    public static String flattenUserTexts(ChatRequestContext ctx) {
         if (ctx == null) {
             return "";
         }
         List<Map<String, String>> messages = ctx.getMessages();
         if (messages != null && !messages.isEmpty()) {
-            for (int i = messages.size() - 1; i >= 0; i--) {
-                Map<String, String> msg = messages.get(i);
+            List<String> parts = new ArrayList<String>();
+            for (Map<String, String> msg : messages) {
                 if (msg == null) {
                     continue;
                 }
                 String role = msg.get("role");
-                if (role != null && "user".equalsIgnoreCase(role.trim())) {
-                    String content = msg.get("content");
-                    return content == null ? "" : content;
+                if (role == null || !"user".equalsIgnoreCase(role.trim())) {
+                    continue;
                 }
+                String content = msg.get("content");
+                if (content == null) {
+                    continue;
+                }
+                String trimmed = content.trim();
+                if (!trimmed.isEmpty()) {
+                    parts.add(trimmed);
+                }
+            }
+            if (!parts.isEmpty()) {
+                StringBuilder sb = new StringBuilder();
+                for (int i = 0; i < parts.size(); i++) {
+                    if (i > 0) {
+                        sb.append(USER_SEP);
+                    }
+                    sb.append(parts.get(i));
+                }
+                return sb.toString();
             }
         }
         String prompt = ctx.getPrompt();
-        return prompt == null ? "" : prompt;
-    }
-
-    private static String truncateForLog(String text) {
-        if (text == null) {
+        if (prompt == null) {
             return "";
         }
-        if (text.length() <= LOG_TEXT_MAX) {
-            return text;
-        }
-        return text.substring(0, LOG_TEXT_MAX) + "...";
+        return prompt.trim();
     }
 }
