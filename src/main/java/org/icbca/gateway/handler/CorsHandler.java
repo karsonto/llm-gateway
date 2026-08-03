@@ -23,7 +23,7 @@ public final class CorsHandler extends ChannelDuplexHandler {
 
     private static final String ALLOW_ORIGIN = "*";
     private static final String ALLOW_METHODS = "GET, POST, PATCH, OPTIONS";
-    private static final String ALLOW_HEADERS = "Authorization, Content-Type, X-API-Key";
+    private static final String ALLOW_HEADERS = "Authorization, Content-Type, X-API-Key, Classification";
     private static final String MAX_AGE = "86400";
 
     @Override

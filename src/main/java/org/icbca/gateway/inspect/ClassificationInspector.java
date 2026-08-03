@@ -28,10 +28,16 @@ public final class ClassificationInspector implements ChatRequestInspector {
         ctx.getAttributes().put(ATTR_USER_TEXT, userText);
         ctx.getAttributes().put(ATTR_CATEGORY, CATEGORY_PLACEHOLDER);
 
-        if (csvCollector != null && !userText.isEmpty()) {
+        if (csvCollector != null && !userText.isEmpty() && !isCollectIgnored(ctx)) {
             csvCollector.append(userText);
         }
         return InspectionResult.allow();
+    }
+
+    /** Skip CSV collect when request header {@code Classification: Ignore}. */
+    private static boolean isCollectIgnored(ChatRequestContext ctx) {
+        String v = ctx.getHeader("Classification");
+        return v != null && "Ignore".equalsIgnoreCase(v.trim());
     }
 
     /**
