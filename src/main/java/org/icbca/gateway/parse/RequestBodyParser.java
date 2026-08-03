@@ -94,6 +94,39 @@ public final class RequestBodyParser {
         if (contentNode.isTextual()) {
             return contentNode.asText();
         }
-        return contentNode.toString();
+        if (contentNode.isArray()) {
+            StringBuilder sb = new StringBuilder();
+            for (JsonNode part : contentNode) {
+                if (part == null || !part.isObject()) {
+                    continue;
+                }
+                JsonNode type = part.get("type");
+                // Prefer type=text; if type is absent, still take a text field when present.
+                boolean isText = type == null || type.isNull()
+                        || "text".equalsIgnoreCase(type.asText());
+                if (!isText) {
+                    continue;
+                }
+                JsonNode text = part.get("text");
+                if (text == null || text.isNull()) {
+                    continue;
+                }
+                String s = text.asText();
+                if (s == null) {
+                    continue;
+                }
+                String trimmed = s.trim();
+                if (trimmed.isEmpty()) {
+                    continue;
+                }
+                if (sb.length() > 0) {
+                    sb.append('\n');
+                }
+                sb.append(trimmed);
+            }
+            return sb.toString();
+        }
+        // Non-text, non-array objects: do not dump JSON (avoids base64 / image_url pollution).
+        return "";
     }
 }
