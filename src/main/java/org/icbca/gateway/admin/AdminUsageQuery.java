@@ -91,16 +91,175 @@ public final class AdminUsageQuery {
         }
     }
 
+    /**
+     * Top N by total_tokens for names (api keys) and groups within an optional date range.
+     * {@code limit <= 0} means no LIMIT (return all ranked rows).
+     */
+    public String queryRankJson(String from, String to, int limit) {
+        final int top = limit;
+        try {
+            List<NameRank> names = db.withConnection(new SqliteDatabase.SqlWork<List<NameRank>>() {
+                @Override
+                public List<NameRank> run(java.sql.Connection connection) throws SQLException {
+                    StringBuilder sql = new StringBuilder(
+                            "SELECT u.api_key AS api_key, "
+                                    + "COALESCE(NULLIF(k.name, ''), u.api_key) AS name, "
+                                    + "COALESCE(k.group_name, 'default') AS group_name, "
+                                    + "SUM(u.request_count) AS request_count, "
+                                    + "SUM(u.prompt_tokens) AS prompt_tokens, "
+                                    + "SUM(u.completion_tokens) AS completion_tokens, "
+                                    + "SUM(u.total_tokens) AS total_tokens "
+                                    + "FROM usage_daily u "
+                                    + "LEFT JOIN api_keys k ON u.api_key = k.api_key "
+                                    + "WHERE 1=1");
+                    List<String> params = new ArrayList<String>();
+                    appendDateFiltersPrefixed(sql, params, "u.", from, to);
+                    sql.append(" GROUP BY u.api_key ORDER BY total_tokens DESC, request_count DESC");
+                    if (top > 0) {
+                        sql.append(" LIMIT ?");
+                    }
+                    PreparedStatement ps = connection.prepareStatement(sql.toString());
+                    try {
+                        for (int i = 0; i < params.size(); i++) {
+                            ps.setString(i + 1, params.get(i));
+                        }
+                        if (top > 0) {
+                            ps.setInt(params.size() + 1, top);
+                        }
+                        ResultSet rs = ps.executeQuery();
+                        try {
+                            List<NameRank> list = new ArrayList<NameRank>();
+                            int rank = 1;
+                            while (rs.next()) {
+                                list.add(new NameRank(
+                                        rank++,
+                                        rs.getString("api_key"),
+                                        rs.getString("name"),
+                                        rs.getString("group_name"),
+                                        rs.getLong("request_count"),
+                                        rs.getLong("prompt_tokens"),
+                                        rs.getLong("completion_tokens"),
+                                        rs.getLong("total_tokens")));
+                            }
+                            return list;
+                        } finally {
+                            rs.close();
+                        }
+                    } finally {
+                        ps.close();
+                    }
+                }
+            });
+
+            List<GroupRank> groups = db.withConnection(new SqliteDatabase.SqlWork<List<GroupRank>>() {
+                @Override
+                public List<GroupRank> run(java.sql.Connection connection) throws SQLException {
+                    StringBuilder sql = new StringBuilder(
+                            "SELECT COALESCE(k.group_name, 'default') AS group_name, "
+                                    + "SUM(u.request_count) AS request_count, "
+                                    + "SUM(u.prompt_tokens) AS prompt_tokens, "
+                                    + "SUM(u.completion_tokens) AS completion_tokens, "
+                                    + "SUM(u.total_tokens) AS total_tokens "
+                                    + "FROM usage_daily u "
+                                    + "LEFT JOIN api_keys k ON u.api_key = k.api_key "
+                                    + "WHERE 1=1");
+                    List<String> params = new ArrayList<String>();
+                    appendDateFiltersPrefixed(sql, params, "u.", from, to);
+                    sql.append(" GROUP BY COALESCE(k.group_name, 'default') "
+                            + "ORDER BY total_tokens DESC, request_count DESC");
+                    if (top > 0) {
+                        sql.append(" LIMIT ?");
+                    }
+                    PreparedStatement ps = connection.prepareStatement(sql.toString());
+                    try {
+                        for (int i = 0; i < params.size(); i++) {
+                            ps.setString(i + 1, params.get(i));
+                        }
+                        if (top > 0) {
+                            ps.setInt(params.size() + 1, top);
+                        }
+                        ResultSet rs = ps.executeQuery();
+                        try {
+                            List<GroupRank> list = new ArrayList<GroupRank>();
+                            int rank = 1;
+                            while (rs.next()) {
+                                list.add(new GroupRank(
+                                        rank++,
+                                        rs.getString("group_name"),
+                                        rs.getLong("request_count"),
+                                        rs.getLong("prompt_tokens"),
+                                        rs.getLong("completion_tokens"),
+                                        rs.getLong("total_tokens")));
+                            }
+                            return list;
+                        } finally {
+                            rs.close();
+                        }
+                    } finally {
+                        ps.close();
+                    }
+                }
+            });
+
+            return toRankJson(names, groups);
+        } catch (SQLException e) {
+            log.warn("queryRank failed: {}", e.getMessage());
+            return "{\"by_name\":[],\"by_group\":[],\"error\":\"" + escape(e.getMessage()) + "\"}";
+        }
+    }
+
     private static void appendDateFilters(StringBuilder sql, List<String> params,
                                           String from, String to) {
+        appendDateFiltersPrefixed(sql, params, "", from, to);
+    }
+
+    private static void appendDateFiltersPrefixed(StringBuilder sql, List<String> params,
+                                                  String columnPrefix, String from, String to) {
+        String col = (columnPrefix == null ? "" : columnPrefix) + "usage_date";
         if (from != null && !from.isEmpty()) {
-            sql.append(" AND usage_date >= ?");
+            sql.append(" AND ").append(col).append(" >= ?");
             params.add(from);
         }
         if (to != null && !to.isEmpty()) {
-            sql.append(" AND usage_date <= ?");
+            sql.append(" AND ").append(col).append(" <= ?");
             params.add(to);
         }
+    }
+
+    private static String toRankJson(List<NameRank> names, List<GroupRank> groups) {
+        StringBuilder sb = new StringBuilder(512);
+        sb.append("{\"by_name\":[");
+        for (int i = 0; i < names.size(); i++) {
+            if (i > 0) {
+                sb.append(',');
+            }
+            NameRank n = names.get(i);
+            sb.append("{\"rank\":").append(n.rank)
+                    .append(",\"api_key\":\"").append(escape(n.apiKey)).append("\"")
+                    .append(",\"name\":\"").append(escape(n.name)).append("\"")
+                    .append(",\"group_name\":\"").append(escape(n.groupName)).append("\"")
+                    .append(",\"request_count\":").append(n.requestCount)
+                    .append(",\"prompt_tokens\":").append(n.promptTokens)
+                    .append(",\"completion_tokens\":").append(n.completionTokens)
+                    .append(",\"total_tokens\":").append(n.totalTokens)
+                    .append('}');
+        }
+        sb.append("],\"by_group\":[");
+        for (int i = 0; i < groups.size(); i++) {
+            if (i > 0) {
+                sb.append(',');
+            }
+            GroupRank g = groups.get(i);
+            sb.append("{\"rank\":").append(g.rank)
+                    .append(",\"group_name\":\"").append(escape(g.groupName)).append("\"")
+                    .append(",\"request_count\":").append(g.requestCount)
+                    .append(",\"prompt_tokens\":").append(g.promptTokens)
+                    .append(",\"completion_tokens\":").append(g.completionTokens)
+                    .append(",\"total_tokens\":").append(g.totalTokens)
+                    .append('}');
+        }
+        sb.append("]}");
+        return sb.toString();
     }
 
     private static List<Row> queryRows(java.sql.Connection connection, String sql,
@@ -207,6 +366,48 @@ public final class AdminUsageQuery {
 
         ModelAgg(String model) {
             this.model = model;
+        }
+    }
+
+    private static final class NameRank {
+        final int rank;
+        final String apiKey;
+        final String name;
+        final String groupName;
+        final long requestCount;
+        final long promptTokens;
+        final long completionTokens;
+        final long totalTokens;
+
+        NameRank(int rank, String apiKey, String name, String groupName,
+                 long requestCount, long promptTokens, long completionTokens, long totalTokens) {
+            this.rank = rank;
+            this.apiKey = apiKey;
+            this.name = name;
+            this.groupName = groupName;
+            this.requestCount = requestCount;
+            this.promptTokens = promptTokens;
+            this.completionTokens = completionTokens;
+            this.totalTokens = totalTokens;
+        }
+    }
+
+    private static final class GroupRank {
+        final int rank;
+        final String groupName;
+        final long requestCount;
+        final long promptTokens;
+        final long completionTokens;
+        final long totalTokens;
+
+        GroupRank(int rank, String groupName, long requestCount, long promptTokens,
+                  long completionTokens, long totalTokens) {
+            this.rank = rank;
+            this.groupName = groupName;
+            this.requestCount = requestCount;
+            this.promptTokens = promptTokens;
+            this.completionTokens = completionTokens;
+            this.totalTokens = totalTokens;
         }
     }
 }

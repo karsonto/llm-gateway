@@ -131,3 +131,36 @@ export const fetchUsageByGroup = (groupName: string, from?: string, to?: string)
 /** All keys aggregated; reuses by-group without group filter. */
 export const fetchUsageAll = (from?: string, to?: string) =>
   fetchUsageByGroup("", from, to);
+
+export type UsageNameRank = {
+  rank: number;
+  api_key: string;
+  name: string;
+  group_name: string;
+  request_count: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+};
+
+export type UsageGroupRank = {
+  rank: number;
+  group_name: string;
+  request_count: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+};
+
+export type UsageRankResponse = {
+  by_name: UsageNameRank[];
+  by_group: UsageGroupRank[];
+};
+
+export const fetchUsageRank = (from?: string, to?: string, limit = 10) => {
+  const q = new URLSearchParams();
+  if (from) q.set("from", from);
+  if (to) q.set("to", to);
+  q.set("limit", String(limit));
+  return api<UsageRankResponse>(`/usage/rank?${q}`);
+};

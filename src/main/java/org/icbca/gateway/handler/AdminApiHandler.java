@@ -139,6 +139,25 @@ public final class AdminApiHandler extends SimpleChannelInboundHandler<FullHttpR
                 return;
             }
 
+            if ("/usage/rank".equals(sub) && HttpMethod.GET.equals(request.method())) {
+                if (!requireAuth(ctx, request)) {
+                    return;
+                }
+                Map<String, String> q = parseQuery(request.uri());
+                int limit = 10;
+                String limitRaw = q.get("limit");
+                if (limitRaw != null && !limitRaw.isEmpty()) {
+                    try {
+                        limit = Integer.parseInt(limitRaw.trim());
+                    } catch (NumberFormatException ignored) {
+                        limit = 10;
+                    }
+                }
+                writeJson(ctx, HttpResponseStatus.OK,
+                        usageQuery.queryRankJson(q.get("from"), q.get("to"), limit));
+                return;
+            }
+
             writeError(ctx, HttpResponseStatus.NOT_FOUND, "not_found", "Unknown admin API path");
         } finally {
             request.release();

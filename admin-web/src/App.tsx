@@ -4,6 +4,7 @@ import LoginPage from "./pages/LoginPage";
 import Layout from "./pages/Layout";
 import KeysPage from "./pages/KeysPage";
 import UsagePage from "./pages/UsagePage";
+import UsageRankPage from "./pages/UsageRankPage";
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   if (!getToken()) return <Navigate to="/login" replace />;
@@ -25,6 +26,7 @@ export default function App() {
         <Route index element={<Navigate to="/keys" replace />} />
         <Route path="keys" element={<KeysPage />} />
         <Route path="usage" element={<UsagePage />} />
+        <Route path="usage/rank" element={<UsageRankPage />} />
         <Route path="usage/key" element={<Navigate to="/usage" replace />} />
         <Route path="usage/group" element={<Navigate to="/usage" replace />} />
       </Route>
