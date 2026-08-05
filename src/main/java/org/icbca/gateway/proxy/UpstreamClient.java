@@ -13,6 +13,7 @@ import io.netty.channel.socket.nio.NioSocketChannel;
 import io.netty.handler.codec.http.HttpClientCodec;
 import org.icbca.gateway.config.GatewayConfig;
 import org.icbca.gateway.handler.UpstreamHandler;
+import org.icbca.gateway.usage.LatencyRecorder;
 import org.icbca.gateway.usage.UsageRecorder;
 
 /**
@@ -22,10 +23,13 @@ public final class UpstreamClient {
 
     private final GatewayConfig config;
     private final UsageRecorder usageRecorder;
+    private final LatencyRecorder latencyRecorder;
 
-    public UpstreamClient(GatewayConfig config, UsageRecorder usageRecorder) {
+    public UpstreamClient(GatewayConfig config, UsageRecorder usageRecorder,
+                          LatencyRecorder latencyRecorder) {
         this.config = config;
         this.usageRecorder = usageRecorder;
+        this.latencyRecorder = latencyRecorder;
     }
 
     public ChannelFuture connect(ChannelHandlerContext inboundCtx, String requestId, boolean expectStream,
@@ -45,7 +49,8 @@ public final class UpstreamClient {
                                 .addLast(new HttpClientCodec())
                                 .addLast(new UpstreamHandler(
                                         inbound, requestId, expectStream,
-                                        apiKey, apiKeyName, model, usageRecorder));
+                                        apiKey, apiKeyName, model,
+                                        usageRecorder, latencyRecorder));
                     }
                 });
         ChannelFuture future = bootstrap.connect(config.getVllmHost(), config.getVllmPort());

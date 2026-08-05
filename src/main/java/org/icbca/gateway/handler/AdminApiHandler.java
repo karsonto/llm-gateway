@@ -158,6 +158,17 @@ public final class AdminApiHandler extends SimpleChannelInboundHandler<FullHttpR
                 return;
             }
 
+            if ("/usage/latency".equals(sub) && HttpMethod.GET.equals(request.method())) {
+                if (!requireAuth(ctx, request)) {
+                    return;
+                }
+                Map<String, String> q = parseQuery(request.uri());
+                writeJson(ctx, HttpResponseStatus.OK,
+                        usageQuery.queryLatencyByModelJson(
+                                q.get("from"), q.get("to"), q.get("model")));
+                return;
+            }
+
             writeError(ctx, HttpResponseStatus.NOT_FOUND, "not_found", "Unknown admin API path");
         } finally {
             request.release();

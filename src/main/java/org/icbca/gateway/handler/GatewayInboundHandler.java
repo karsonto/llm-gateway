@@ -27,6 +27,7 @@ import org.icbca.gateway.inspect.InspectionResult;
 import org.icbca.gateway.inspect.InspectorPipeline;
 import org.icbca.gateway.parse.RequestBodyParser;
 import org.icbca.gateway.parse.RequestBodyRewriter;
+import org.icbca.gateway.proxy.UpstreamAttributes;
 import org.icbca.gateway.proxy.UpstreamClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -99,7 +100,10 @@ public final class GatewayInboundHandler extends SimpleChannelInboundHandler<Ful
                                     writeFuture.cause() != null ? writeFuture.cause().getMessage() : "unknown");
                             closeQuietly(ctx.channel());
                             closeQuietly(upstream);
+                            return;
                         }
+                        upstream.attr(UpstreamAttributes.REQUEST_START_NANOS)
+                                .set(System.nanoTime());
                     }
                 });
             }

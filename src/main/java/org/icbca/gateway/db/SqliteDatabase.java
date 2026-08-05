@@ -83,6 +83,22 @@ public final class SqliteDatabase implements AutoCloseable {
                                 + "ON usage_daily(api_key, usage_date)");
                 st.execute(
                         "CREATE INDEX IF NOT EXISTS idx_usage_daily_date ON usage_daily(usage_date)");
+                st.execute(
+                        "CREATE TABLE IF NOT EXISTS latency_hourly ("
+                                + "model TEXT NOT NULL,"
+                                + "hour_bucket TEXT NOT NULL,"
+                                + "request_count INTEGER NOT NULL DEFAULT 0,"
+                                + "latency_sum_ms INTEGER NOT NULL DEFAULT 0,"
+                                + "ttft_sum_ms INTEGER NOT NULL DEFAULT 0,"
+                                + "ttft_count INTEGER NOT NULL DEFAULT 0,"
+                                + "UNIQUE (model, hour_bucket)"
+                                + ")");
+                st.execute(
+                        "CREATE INDEX IF NOT EXISTS idx_latency_hourly_bucket "
+                                + "ON latency_hourly(hour_bucket)");
+                st.execute(
+                        "CREATE INDEX IF NOT EXISTS idx_latency_hourly_model "
+                                + "ON latency_hourly(model)");
             } finally {
                 st.close();
             }

@@ -1,11 +1,12 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
-import { KeyRound, BarChart3, Trophy, LogOut } from "lucide-react";
+import { KeyRound, BarChart3, Trophy, Timer, LogOut } from "lucide-react";
 import { logout, setToken } from "../api";
 
 const nav = [
   { to: "/keys", label: "API Keys", icon: KeyRound },
-  { to: "/usage", label: "用量查询", icon: BarChart3 },
+  { to: "/usage", label: "用量查询", icon: BarChart3, end: true },
   { to: "/usage/rank", label: "用量排名", icon: Trophy },
+  { to: "/usage/latency", label: "响应延迟", icon: Timer },
 ];
 
 export default function Layout() {
@@ -33,7 +34,7 @@ export default function Layout() {
             <NavLink
               key={item.to}
               to={item.to}
-              end={item.to === "/usage"}
+              end={"end" in item ? item.end : false}
               className={({ isActive }) =>
                 `flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition ${
                   isActive

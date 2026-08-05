@@ -13,6 +13,9 @@ import org.icbca.gateway.inspect.InspectorPipeline;
 import org.icbca.gateway.inspect.LoggingInspector;
 import org.icbca.gateway.inspect.UserPromptCsvCollector;
 import org.icbca.gateway.usage.InMemoryUsageRecorder;
+import org.icbca.gateway.usage.LatencyRecorder;
+import org.icbca.gateway.usage.NoopLatencyRecorder;
+import org.icbca.gateway.usage.SqliteLatencyRecorder;
 import org.icbca.gateway.usage.SqliteUsageRecorder;
 import org.icbca.gateway.usage.UsageRecorder;
 import org.slf4j.Logger;
@@ -35,17 +38,20 @@ public final class Main {
         final SqliteDatabase sqliteDb;
         final ApiKeyStore apiKeyStore;
         final UsageRecorder usageRecorder;
+        final LatencyRecorder latencyRecorder;
         final AdminSessionStore adminSessions = new AdminSessionStore();
 
         if (config.isSqliteEnabled()) {
             sqliteDb = SqliteDatabase.open(config.getSqlitePath());
             apiKeyStore = new SqliteApiKeyStore(sqliteDb);
             usageRecorder = new SqliteUsageRecorder(sqliteDb, apiKeyStore);
+            latencyRecorder = new SqliteLatencyRecorder(sqliteDb);
             log.info("Storage: SQLite at {} (gateway.api.keys ignored)", config.getSqlitePath());
         } else {
             sqliteDb = null;
             apiKeyStore = new InMemoryApiKeyStore(config);
             usageRecorder = new InMemoryUsageRecorder(apiKeyStore);
+            latencyRecorder = NoopLatencyRecorder.INSTANCE;
             log.info("Storage: in-memory (admin console requires SQLite)");
         }
 
@@ -64,7 +70,7 @@ public final class Main {
         InspectorPipeline pipeline = new InspectorPipeline(inspectors);
 
         final GatewayServer server = new GatewayServer(
-                config, pipeline, apiKeyStore, usageRecorder, sqliteDb, adminSessions);
+                config, pipeline, apiKeyStore, usageRecorder, latencyRecorder, sqliteDb, adminSessions);
         Runtime.getRuntime().addShutdownHook(new Thread(new Runnable() {
             @Override
             public void run() {

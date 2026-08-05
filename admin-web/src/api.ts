@@ -164,3 +164,29 @@ export const fetchUsageRank = (from?: string, to?: string, limit = 10) => {
   q.set("limit", String(limit));
   return api<UsageRankResponse>(`/usage/rank?${q}`);
 };
+
+export type LatencyPoint = {
+  bucket: string;
+  request_count: number;
+  avg_ttft_ms: number;
+  avg_latency_ms: number;
+};
+
+export type ModelLatencyBlock = {
+  model: string;
+  request_total: number;
+  series: LatencyPoint[];
+};
+
+export type LatencyChartResponse = {
+  models: ModelLatencyBlock[];
+};
+
+export const fetchUsageLatency = (from?: string, to?: string, model?: string) => {
+  const q = new URLSearchParams();
+  if (from) q.set("from", from);
+  if (to) q.set("to", to);
+  if (model) q.set("model", model);
+  const qs = q.toString();
+  return api<LatencyChartResponse>(qs ? `/usage/latency?${qs}` : "/usage/latency");
+};

@@ -24,6 +24,9 @@ import org.icbca.gateway.handler.StaticAdminHandler;
 import org.icbca.gateway.handler.UsageQueryHandler;
 import org.icbca.gateway.inspect.InspectorPipeline;
 import org.icbca.gateway.proxy.UpstreamClient;
+import org.icbca.gateway.usage.LatencyRecorder;
+import org.icbca.gateway.usage.LatencyRecorder;
+import org.icbca.gateway.usage.NoopLatencyRecorder;
 import org.icbca.gateway.usage.UsageRecorder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -39,6 +42,7 @@ public final class GatewayServer {
     private final InspectorPipeline inspectorPipeline;
     private final ApiKeyStore apiKeyStore;
     private final UsageRecorder usageRecorder;
+    private final LatencyRecorder latencyRecorder;
     private final SqliteDatabase sqliteDb;
     private final AdminSessionStore adminSessions;
     private EventLoopGroup bossGroup;
@@ -47,11 +51,13 @@ public final class GatewayServer {
 
     public GatewayServer(GatewayConfig config, InspectorPipeline inspectorPipeline,
                          ApiKeyStore apiKeyStore, UsageRecorder usageRecorder,
-                         SqliteDatabase sqliteDb, AdminSessionStore adminSessions) {
+                         LatencyRecorder latencyRecorder, SqliteDatabase sqliteDb,
+                         AdminSessionStore adminSessions) {
         this.config = config;
         this.inspectorPipeline = inspectorPipeline;
         this.apiKeyStore = apiKeyStore;
         this.usageRecorder = usageRecorder;
+        this.latencyRecorder = latencyRecorder != null ? latencyRecorder : NoopLatencyRecorder.INSTANCE;
         this.sqliteDb = sqliteDb;
         this.adminSessions = adminSessions != null ? adminSessions : new AdminSessionStore();
     }
@@ -59,7 +65,7 @@ public final class GatewayServer {
     public void start() throws InterruptedException {
         bossGroup = new NioEventLoopGroup(1);
         workerGroup = new NioEventLoopGroup();
-        final UpstreamClient upstreamClient = new UpstreamClient(config, usageRecorder);
+        final UpstreamClient upstreamClient = new UpstreamClient(config, usageRecorder, latencyRecorder);
 
         final SqliteApiKeyStore sqliteKeys = apiKeyStore instanceof SqliteApiKeyStore
                 ? (SqliteApiKeyStore) apiKeyStore : null;

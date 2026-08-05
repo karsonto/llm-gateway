@@ -208,6 +208,108 @@ public final class AdminUsageQuery {
         }
     }
 
+    public String queryLatencyByModelJson(String from, String to, String model) {
+        try {
+            final String modelFilter = model == null ? "" : model.trim();
+            List<LatencyRow> rows = db.withConnection(new SqliteDatabase.SqlWork<List<LatencyRow>>() {
+                @Override
+                public List<LatencyRow> run(java.sql.Connection connection) throws SQLException {
+                    StringBuilder sql = new StringBuilder(
+                            "SELECT model, hour_bucket, request_count, latency_sum_ms, "
+                                    + "ttft_sum_ms, ttft_count FROM latency_hourly WHERE 1=1");
+                    List<String> params = new ArrayList<String>();
+                    appendHourBucketFilters(sql, params, from, to);
+                    if (!modelFilter.isEmpty()) {
+                        sql.append(" AND model = ?");
+                        params.add(modelFilter);
+                    }
+                    sql.append(" ORDER BY model ASC, hour_bucket ASC");
+                    PreparedStatement ps = connection.prepareStatement(sql.toString());
+                    try {
+                        for (int i = 0; i < params.size(); i++) {
+                            ps.setString(i + 1, params.get(i));
+                        }
+                        ResultSet rs = ps.executeQuery();
+                        try {
+                            List<LatencyRow> list = new ArrayList<LatencyRow>();
+                            while (rs.next()) {
+                                list.add(new LatencyRow(
+                                        rs.getString("model"),
+                                        rs.getString("hour_bucket"),
+                                        rs.getLong("request_count"),
+                                        rs.getLong("latency_sum_ms"),
+                                        rs.getLong("ttft_sum_ms"),
+                                        rs.getLong("ttft_count")));
+                            }
+                            return list;
+                        } finally {
+                            rs.close();
+                        }
+                    } finally {
+                        ps.close();
+                    }
+                }
+            });
+            return toLatencyModelsJson(rows);
+        } catch (SQLException e) {
+            log.warn("queryLatencyByModel failed: {}", e.getMessage());
+            return "{\"models\":[],\"error\":\"" + escape(e.getMessage()) + "\"}";
+        }
+    }
+
+    private static void appendHourBucketFilters(StringBuilder sql, List<String> params,
+                                                String from, String to) {
+        if (from != null && !from.isEmpty()) {
+            sql.append(" AND hour_bucket >= ?");
+            params.add(from.trim() + " 00");
+        }
+        if (to != null && !to.isEmpty()) {
+            sql.append(" AND hour_bucket <= ?");
+            params.add(to.trim() + " 23");
+        }
+    }
+
+    private static String toLatencyModelsJson(List<LatencyRow> rows) {
+        Map<String, LatencyModelAgg> byModel = new LinkedHashMap<String, LatencyModelAgg>();
+        for (LatencyRow row : rows) {
+            String model = row.model == null ? "unknown" : row.model;
+            LatencyModelAgg agg = byModel.get(model);
+            if (agg == null) {
+                agg = new LatencyModelAgg(model);
+                byModel.put(model, agg);
+            }
+            agg.requestTotal += row.requestCount;
+            agg.series.add(row);
+        }
+        StringBuilder sb = new StringBuilder(512);
+        sb.append("{\"models\":[");
+        int i = 0;
+        for (LatencyModelAgg agg : byModel.values()) {
+            if (i++ > 0) {
+                sb.append(',');
+            }
+            sb.append("{\"model\":\"").append(escape(agg.model)).append("\"")
+                    .append(",\"request_total\":").append(agg.requestTotal)
+                    .append(",\"series\":[");
+            for (int j = 0; j < agg.series.size(); j++) {
+                if (j > 0) {
+                    sb.append(',');
+                }
+                LatencyRow r = agg.series.get(j);
+                long avgLatency = r.requestCount > 0 ? r.latencySumMs / r.requestCount : 0L;
+                long avgTtft = r.ttftCount > 0 ? r.ttftSumMs / r.ttftCount : 0L;
+                sb.append("{\"bucket\":\"").append(escape(r.hourBucket)).append("\"")
+                        .append(",\"request_count\":").append(r.requestCount)
+                        .append(",\"avg_ttft_ms\":").append(avgTtft)
+                        .append(",\"avg_latency_ms\":").append(avgLatency)
+                        .append('}');
+            }
+            sb.append("]}");
+        }
+        sb.append("]}");
+        return sb.toString();
+    }
+
     private static void appendDateFilters(StringBuilder sql, List<String> params,
                                           String from, String to) {
         appendDateFiltersPrefixed(sql, params, "", from, to);
@@ -408,6 +510,35 @@ public final class AdminUsageQuery {
             this.promptTokens = promptTokens;
             this.completionTokens = completionTokens;
             this.totalTokens = totalTokens;
+        }
+    }
+
+    private static final class LatencyRow {
+        final String model;
+        final String hourBucket;
+        final long requestCount;
+        final long latencySumMs;
+        final long ttftSumMs;
+        final long ttftCount;
+
+        LatencyRow(String model, String hourBucket, long requestCount,
+                   long latencySumMs, long ttftSumMs, long ttftCount) {
+            this.model = model;
+            this.hourBucket = hourBucket;
+            this.requestCount = requestCount;
+            this.latencySumMs = latencySumMs;
+            this.ttftSumMs = ttftSumMs;
+            this.ttftCount = ttftCount;
+        }
+    }
+
+    private static final class LatencyModelAgg {
+        final String model;
+        long requestTotal;
+        final List<LatencyRow> series = new ArrayList<LatencyRow>();
+
+        LatencyModelAgg(String model) {
+            this.model = model;
         }
     }
 }

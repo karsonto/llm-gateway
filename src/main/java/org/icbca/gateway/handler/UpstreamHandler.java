@@ -18,6 +18,8 @@ import io.netty.handler.codec.http.HttpUtil;
 import io.netty.handler.codec.http.LastHttpContent;
 import io.netty.util.ReferenceCountUtil;
 import org.icbca.gateway.parse.SseTokenParser;
+import org.icbca.gateway.proxy.UpstreamAttributes;
+import org.icbca.gateway.usage.LatencyRecorder;
 import org.icbca.gateway.usage.TokenUsage;
 import org.icbca.gateway.usage.UsageRecorder;
 import org.slf4j.Logger;
@@ -38,6 +40,7 @@ public final class UpstreamHandler extends ChannelInboundHandlerAdapter {
     private final String apiKeyName;
     private final String model;
     private final UsageRecorder usageRecorder;
+    private final LatencyRecorder latencyRecorder;
     private final SseTokenParser sseParser;
     private final ByteBuf nonStreamBuffer;
     private Channel upstream;
@@ -45,10 +48,12 @@ public final class UpstreamHandler extends ChannelInboundHandlerAdapter {
     private boolean closed;
     private boolean completed;
     private boolean usageRecorded;
+    private boolean latencyRecorded;
+    private long ttftMs = -1L;
 
     public UpstreamHandler(Channel inbound, String requestId, boolean expectStream,
                            String apiKey, String apiKeyName, String model,
-                           UsageRecorder usageRecorder) {
+                           UsageRecorder usageRecorder, LatencyRecorder latencyRecorder) {
         this.inbound = inbound;
         this.requestId = requestId;
         this.expectStream = expectStream;
@@ -56,6 +61,7 @@ public final class UpstreamHandler extends ChannelInboundHandlerAdapter {
         this.apiKeyName = apiKeyName;
         this.model = model;
         this.usageRecorder = usageRecorder;
+        this.latencyRecorder = latencyRecorder;
         this.sseParser = new SseTokenParser(requestId);
         this.nonStreamBuffer = Unpooled.buffer();
     }
@@ -83,6 +89,8 @@ public final class UpstreamHandler extends ChannelInboundHandlerAdapter {
             String contentType = upstreamResp.headers().get(HttpHeaderNames.CONTENT_TYPE);
             eventStream = contentType != null && contentType.toLowerCase().contains("text/event-stream");
 
+            markTtftIfNeeded();
+
             DefaultHttpResponse clientResp = new DefaultHttpResponse(
                     upstreamResp.protocolVersion(), upstreamResp.status());
             clientResp.headers().set(upstreamResp.headers());
@@ -96,6 +104,10 @@ public final class UpstreamHandler extends ChannelInboundHandlerAdapter {
             HttpContent content = (HttpContent) msg;
             ByteBuf buf = content.content();
             boolean last = content instanceof LastHttpContent;
+
+            if (buf.isReadable()) {
+                markTtftIfNeeded();
+            }
 
             if (eventStream || expectStream) {
                 if (buf.isReadable()) {
@@ -158,6 +170,7 @@ public final class UpstreamHandler extends ChannelInboundHandlerAdapter {
         if (!completed) {
             completed = true;
             sseParser.onComplete();
+            recordLatencyOnce();
             recordUsageOnce();
         }
         closeQuietly(upstream != null ? upstream : null);
@@ -178,11 +191,38 @@ public final class UpstreamHandler extends ChannelInboundHandlerAdapter {
         usageRecorder.record(apiKey, apiKeyName, model, usage);
     }
 
+    private void markTtftIfNeeded() {
+        if (ttftMs >= 0) {
+            return;
+        }
+        Long startNanos = upstream != null
+                ? upstream.attr(UpstreamAttributes.REQUEST_START_NANOS).get() : null;
+        if (startNanos == null) {
+            return;
+        }
+        ttftMs = Math.max(0L, (System.nanoTime() - startNanos.longValue()) / 1_000_000L);
+    }
+
+    private void recordLatencyOnce() {
+        if (latencyRecorded || latencyRecorder == null) {
+            return;
+        }
+        Long startNanos = upstream != null
+                ? upstream.attr(UpstreamAttributes.REQUEST_START_NANOS).get() : null;
+        if (startNanos == null) {
+            return;
+        }
+        latencyRecorded = true;
+        long latencyMs = Math.max(0L, (System.nanoTime() - startNanos.longValue()) / 1_000_000L);
+        latencyRecorder.record(model, latencyMs, ttftMs);
+    }
+
     @Override
     public void channelInactive(ChannelHandlerContext ctx) {
         if (!completed) {
             completed = true;
             sseParser.onComplete();
+            recordLatencyOnce();
             recordUsageOnce();
         }
         cleanup();
