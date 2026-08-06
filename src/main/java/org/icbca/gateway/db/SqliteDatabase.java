@@ -60,6 +60,7 @@ public final class SqliteDatabase implements AutoCloseable {
                                 + "api_key TEXT NOT NULL UNIQUE,"
                                 + "name TEXT NOT NULL,"
                                 + "group_name TEXT NOT NULL DEFAULT 'default',"
+                                + "department TEXT NOT NULL DEFAULT 'FTD',"
                                 + "enabled INTEGER NOT NULL DEFAULT 1,"
                                 + "monthly_token_limit INTEGER NOT NULL DEFAULT 0,"
                                 + "created_at TEXT NOT NULL DEFAULT (datetime('now')),"
@@ -67,7 +68,10 @@ public final class SqliteDatabase implements AutoCloseable {
                                 + ")");
                 st.execute("CREATE INDEX IF NOT EXISTS idx_api_keys_enabled ON api_keys(enabled)");
                 st.execute("CREATE INDEX IF NOT EXISTS idx_api_keys_group ON api_keys(group_name)");
+                st.execute(
+                        "CREATE INDEX IF NOT EXISTS idx_api_keys_department ON api_keys(department)");
                 migrateApiKeysAddMonthlyTokenLimit(st);
+                migrateApiKeysAddDepartment(st);
                 st.execute(
                         "CREATE TABLE IF NOT EXISTS usage_daily ("
                                 + "id INTEGER PRIMARY KEY AUTOINCREMENT,"
@@ -117,6 +121,15 @@ public final class SqliteDatabase implements AutoCloseable {
         st.execute(
                 "ALTER TABLE api_keys ADD COLUMN monthly_token_limit INTEGER NOT NULL DEFAULT 0");
         log.info("migrated api_keys: added monthly_token_limit");
+    }
+
+    private void migrateApiKeysAddDepartment(Statement st) throws SQLException {
+        if (columnExists(st, "api_keys", "department")) {
+            return;
+        }
+        st.execute(
+                "ALTER TABLE api_keys ADD COLUMN department TEXT NOT NULL DEFAULT 'FTD'");
+        log.info("migrated api_keys: added department");
     }
 
     private void migrateLatencyHourlyAddMaxMs(Statement st) throws SQLException {

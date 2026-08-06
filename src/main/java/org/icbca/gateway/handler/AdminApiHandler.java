@@ -119,6 +119,14 @@ public final class AdminApiHandler extends SimpleChannelInboundHandler<FullHttpR
                 return;
             }
 
+            if ("/departments".equals(sub) && HttpMethod.GET.equals(request.method())) {
+                if (!requireAuth(ctx, request)) {
+                    return;
+                }
+                writeJson(ctx, HttpResponseStatus.OK, stringListJson(sqliteKeyStore.listDepartments()));
+                return;
+            }
+
             if ("/usage/by-key".equals(sub) && HttpMethod.GET.equals(request.method())) {
                 if (!requireAuth(ctx, request)) {
                     return;
@@ -136,6 +144,17 @@ public final class AdminApiHandler extends SimpleChannelInboundHandler<FullHttpR
                 Map<String, String> q = parseQuery(request.uri());
                 writeJson(ctx, HttpResponseStatus.OK,
                         usageQuery.queryByGroupJson(q.get("group_name"), q.get("from"), q.get("to")));
+                return;
+            }
+
+            if ("/usage/by-department".equals(sub) && HttpMethod.GET.equals(request.method())) {
+                if (!requireAuth(ctx, request)) {
+                    return;
+                }
+                Map<String, String> q = parseQuery(request.uri());
+                writeJson(ctx, HttpResponseStatus.OK,
+                        usageQuery.queryByDepartmentJson(
+                                q.get("department"), q.get("from"), q.get("to")));
                 return;
             }
 
@@ -216,12 +235,13 @@ public final class AdminApiHandler extends SimpleChannelInboundHandler<FullHttpR
             String apiKey = text(root, "api_key");
             String name = text(root, "name");
             String group = text(root, "group_name");
+            String department = text(root, "department");
             boolean enabled = !root.has("enabled") || root.get("enabled").asBoolean(true);
             long monthlyLimit = 0L;
             if (root.has("monthly_token_limit") && !root.get("monthly_token_limit").isNull()) {
                 monthlyLimit = Math.max(0L, root.get("monthly_token_limit").asLong(0L));
             }
-            ApiKeyInfo info = sqliteKeyStore.create(apiKey, name, group, enabled, monthlyLimit);
+            ApiKeyInfo info = sqliteKeyStore.create(apiKey, name, group, department, enabled, monthlyLimit);
             writeJson(ctx, HttpResponseStatus.OK, keyToJson(info, 0L));
         } catch (SQLException e) {
             writeError(ctx, HttpResponseStatus.CONFLICT, "create_failed", e.getMessage());
@@ -237,12 +257,13 @@ public final class AdminApiHandler extends SimpleChannelInboundHandler<FullHttpR
             String apiKey = text(root, "api_key");
             String name = root.has("name") ? text(root, "name") : null;
             String group = root.has("group_name") ? text(root, "group_name") : null;
+            String department = root.has("department") ? text(root, "department") : null;
             Boolean enabled = root.has("enabled") ? Boolean.valueOf(root.get("enabled").asBoolean()) : null;
             Long monthlyLimit = null;
             if (root.has("monthly_token_limit") && !root.get("monthly_token_limit").isNull()) {
                 monthlyLimit = Long.valueOf(Math.max(0L, root.get("monthly_token_limit").asLong(0L)));
             }
-            ApiKeyInfo info = sqliteKeyStore.update(apiKey, name, group, enabled, monthlyLimit);
+            ApiKeyInfo info = sqliteKeyStore.update(apiKey, name, group, enabled, monthlyLimit, department);
             long used = usageQuery.sumTotalTokensForCurrentMonth(info.getKey());
             writeJson(ctx, HttpResponseStatus.OK, keyToJson(info, used));
         } catch (SQLException e) {
@@ -317,6 +338,7 @@ public final class AdminApiHandler extends SimpleChannelInboundHandler<FullHttpR
         Map<String, String> q = parseQuery(uri);
         String search = blankToNull(q.get("q"));
         String group = blankToNull(q.get("group"));
+        String department = blankToNull(q.get("department"));
         Boolean enabled = parseEnabled(q.get("enabled"));
         int page = parsePositiveInt(q.get("page"), 1);
         int pageSize = parsePositiveInt(q.get("page_size"), 20);
@@ -324,8 +346,8 @@ public final class AdminApiHandler extends SimpleChannelInboundHandler<FullHttpR
             pageSize = 100;
         }
         int offset = (page - 1) * pageSize;
-        int total = sqliteKeyStore.countPage(search, group, enabled);
-        List<ApiKeyInfo> items = sqliteKeyStore.listPage(search, group, enabled, offset, pageSize);
+        int total = sqliteKeyStore.countPage(search, group, department, enabled);
+        List<ApiKeyInfo> items = sqliteKeyStore.listPage(search, group, department, enabled, offset, pageSize);
         Map<String, Long> monthUsed = usageQuery.sumTotalTokensByKeyForCurrentMonth();
         StringBuilder sb = new StringBuilder(256);
         sb.append("{\"total\":").append(total)
@@ -394,6 +416,7 @@ public final class AdminApiHandler extends SimpleChannelInboundHandler<FullHttpR
         return "{\"api_key\":\"" + escape(info.getKey())
                 + "\",\"name\":\"" + escape(info.getName())
                 + "\",\"group_name\":\"" + escape(info.getGroupName())
+                + "\",\"department\":\"" + escape(info.getDepartment())
                 + "\",\"enabled\":" + info.isEnabled()
                 + ",\"monthly_token_limit\":" + info.getMonthlyTokenLimit()
                 + ",\"month_used_tokens\":" + monthUsedTokens

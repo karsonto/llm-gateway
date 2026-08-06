@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import {
+  UsageDepartmentRank,
   UsageGroupRank,
   UsageNameRank,
   fetchUsageRank,
@@ -37,6 +38,7 @@ export default function UsageRankPage() {
   const [scope, setScope] = useState<Scope>("10");
   const [byName, setByName] = useState<UsageNameRank[]>([]);
   const [byGroup, setByGroup] = useState<UsageGroupRank[]>([]);
+  const [byDepartment, setByDepartment] = useState<UsageDepartmentRank[]>([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -47,6 +49,7 @@ export default function UsageRankPage() {
       const res = await fetchUsageRank(from, to, scopeLimit(targetScope));
       setByName(res.by_name || []);
       setByGroup(res.by_group || []);
+      setByDepartment(res.by_department || []);
     } catch (e: any) {
       setError(e?.message || "查询失败");
     } finally {
@@ -80,7 +83,7 @@ export default function UsageRankPage() {
       <div>
         <h1 className="text-xl font-semibold text-slate-800">用量排名</h1>
         <p className="text-sm text-slate-500 mt-1">
-          按时间范围统计 Token 用量 {label}（人员 / 组别）
+          按时间范围统计 Token 用量 {label}（人员 / 组别 / 部门）
         </p>
       </div>
 
@@ -125,16 +128,17 @@ export default function UsageRankPage() {
         <div className="p-3 rounded-md bg-rose-50 text-sm text-rose-600 border border-rose-200/60">{error}</div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <RankTable
           title={`人员 ${label}`}
           empty="暂无人员用量数据"
           loading={loading}
-          headers={["#", "名称", "组别", "请求数", "Total Tokens"]}
+          headers={["#", "名称", "组别", "部门", "请求数", "Total Tokens"]}
           rows={byName.map((r) => [
             String(r.rank),
             r.name,
             r.group_name,
+            r.department || "FTD",
             formatNum(r.request_count),
             formatNum(r.total_tokens),
           ])}
@@ -147,6 +151,18 @@ export default function UsageRankPage() {
           rows={byGroup.map((r) => [
             String(r.rank),
             r.group_name,
+            formatNum(r.request_count),
+            formatNum(r.total_tokens),
+          ])}
+        />
+        <RankTable
+          title={`部门 ${label}`}
+          empty="暂无部门用量数据"
+          loading={loading}
+          headers={["#", "部门", "请求数", "Total Tokens"]}
+          rows={byDepartment.map((r) => [
+            String(r.rank),
+            r.department,
             formatNum(r.request_count),
             formatNum(r.total_tokens),
           ])}
@@ -178,7 +194,7 @@ function RankTable({
         <thead className="bg-slate-50 text-slate-500 text-left">
           <tr>
             {headers.map((h) => (
-              <th key={h} className="px-4 py-2.5 font-medium">
+              <th key={h} className="px-3 py-2 font-medium">
                 {h}
               </th>
             ))}
@@ -187,7 +203,7 @@ function RankTable({
         <tbody>
           {rows.length === 0 ? (
             <tr>
-              <td colSpan={headers.length} className="px-4 py-10 text-center text-slate-400">
+              <td colSpan={headers.length} className="px-3 py-8 text-center text-slate-400">
                 {loading ? "加载中…" : empty}
               </td>
             </tr>
@@ -195,12 +211,7 @@ function RankTable({
             rows.map((row, i) => (
               <tr key={i} className="border-t border-slate-100">
                 {row.map((cell, j) => (
-                  <td
-                    key={j}
-                    className={`px-4 py-2.5 ${j === 0 ? "text-slate-400 w-10" : "text-slate-700"} ${
-                      j === row.length - 1 ? "font-medium tabular-nums" : ""
-                    }`}
-                  >
+                  <td key={j} className="px-3 py-2.5 text-slate-700">
                     {cell}
                   </td>
                 ))}

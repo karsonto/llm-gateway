@@ -18,6 +18,7 @@ import { Maximize2, Minimize2, RefreshCw } from "lucide-react";
 import {
   OverviewResponse,
   OverviewTokenBreakdown,
+  OverviewTopDepartment,
   OverviewTopUser,
   fetchOverview,
 } from "../api";
@@ -187,6 +188,7 @@ function TopUsersTable({ rows }: { rows: OverviewTopUser[] }) {
                 <th className="pb-2 font-medium">#</th>
                 <th className="pb-2 font-medium">用户</th>
                 <th className="pb-2 font-medium">组别</th>
+                <th className="pb-2 font-medium">部门</th>
                 <th className="pb-2 font-medium text-right">请求</th>
                 <th className="pb-2 font-medium text-right">Token</th>
               </tr>
@@ -197,6 +199,44 @@ function TopUsersTable({ rows }: { rows: OverviewTopUser[] }) {
                   <td className="py-2.5 text-slate-400">{i + 1}</td>
                   <td className="py-2.5 font-medium text-slate-800">{r.name}</td>
                   <td className="py-2.5 text-slate-500">{r.group_name || "—"}</td>
+                  <td className="py-2.5 text-slate-500">{r.department || "FTD"}</td>
+                  <td className="py-2.5 text-right dash-mono text-slate-700">{formatNum(r.request_count)}</td>
+                  <td className="py-2.5 text-right dash-mono text-sky-600">{formatTokens(r.total_tokens)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TopDepartmentsTable({ rows }: { rows: OverviewTopDepartment[] }) {
+  return (
+    <div
+      className="rounded-xl bg-white border border-slate-200 shadow-sm p-4 dash-animate"
+      style={{ animationDelay: "180ms" }}
+    >
+      <h3 className="text-sm font-medium text-slate-500 mb-3">今日部门 Top</h3>
+      {rows.length === 0 ? (
+        <div className="text-sm text-slate-400 py-8 text-center">暂无数据</div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="text-slate-500 text-left">
+              <tr>
+                <th className="pb-2 font-medium">#</th>
+                <th className="pb-2 font-medium">部门</th>
+                <th className="pb-2 font-medium text-right">请求</th>
+                <th className="pb-2 font-medium text-right">Token</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r, i) => (
+                <tr key={`${r.department}-${i}`} className="border-t border-slate-100">
+                  <td className="py-2.5 text-slate-400">{i + 1}</td>
+                  <td className="py-2.5 font-medium text-slate-800">{r.department || "FTD"}</td>
                   <td className="py-2.5 text-right dash-mono text-slate-700">{formatNum(r.request_count)}</td>
                   <td className="py-2.5 text-right dash-mono text-sky-600">{formatTokens(r.total_tokens)}</td>
                 </tr>
@@ -369,8 +409,9 @@ export default function DashboardPage({
           <LatencySparkChart data={data?.latency_24h || []} />
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
           <TopUsersTable rows={data?.top_users_today || []} />
+          <TopDepartmentsTable rows={data?.top_departments_today || []} />
           <TokenBreakdownPie
             data={data?.token_breakdown_today || { prompt_tokens: 0, completion_tokens: 0 }}
           />

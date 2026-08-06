@@ -104,6 +104,7 @@ public final class AdminUsageQuery {
                     List<TrendPoint> trend = queryTokenTrend(connection, trendFrom, todayStr);
                     List<LatencyPoint> latency = queryLatency24h(connection, latencyFrom);
                     List<TopUser> topUsers = queryTopUsers(connection, todayStr);
+                    List<TopDepartment> topDepartments = queryTopDepartments(connection, todayStr);
 
                     String generatedAt = java.time.ZonedDateTime.now(zoneId).format(ISO_INSTANT);
                     StringBuilder sb = new StringBuilder(1024);
@@ -150,8 +151,22 @@ public final class AdminUsageQuery {
                         TopUser u = topUsers.get(i);
                         sb.append("{\"name\":\"").append(escape(u.name)).append("\"")
                                 .append(",\"group_name\":\"").append(escape(u.groupName)).append("\"")
+                                .append(",\"department\":\"").append(escape(u.department)).append("\"")
                                 .append(",\"total_tokens\":").append(u.totalTokens)
                                 .append(",\"request_count\":").append(u.requestCount)
+                                .append('}');
+                    }
+                    sb.append(']');
+
+                    sb.append(",\"top_departments_today\":[");
+                    for (int i = 0; i < topDepartments.size(); i++) {
+                        if (i > 0) {
+                            sb.append(',');
+                        }
+                        TopDepartment d = topDepartments.get(i);
+                        sb.append("{\"department\":\"").append(escape(d.department)).append("\"")
+                                .append(",\"total_tokens\":").append(d.totalTokens)
+                                .append(",\"request_count\":").append(d.requestCount)
                                 .append('}');
                     }
                     sb.append(']');
@@ -168,6 +183,7 @@ public final class AdminUsageQuery {
             return "{\"generated_at\":\"\",\"kpis\":{\"today_requests\":0,\"today_tokens\":0,"
                     + "\"month_tokens\":0,\"today_active_users\":0,\"month_requests\":0},"
                     + "\"token_trend_7d\":[],\"latency_24h\":[],\"top_users_today\":[],"
+                    + "\"top_departments_today\":[],"
                     + "\"token_breakdown_today\":{\"prompt_tokens\":0,\"completion_tokens\":0},"
                     + "\"error\":\"" + escape(e.getMessage()) + "\"}";
         }
@@ -306,6 +322,7 @@ public final class AdminUsageQuery {
         PreparedStatement ps = connection.prepareStatement(
                 "SELECT COALESCE(k.name, u.api_key) AS user_name, "
                         + "COALESCE(MAX(k.group_name), 'default') AS group_name, "
+                        + "COALESCE(MAX(k.department), 'FTD') AS department, "
                         + "COALESCE(SUM(u.total_tokens), 0) AS total_tokens, "
                         + "COALESCE(SUM(u.request_count), 0) AS request_count "
                         + "FROM usage_daily u LEFT JOIN api_keys k ON u.api_key = k.api_key "
@@ -321,6 +338,38 @@ public final class AdminUsageQuery {
                     list.add(new TopUser(
                             rs.getString("user_name"),
                             rs.getString("group_name"),
+                            rs.getString("department"),
+                            rs.getLong("total_tokens"),
+                            rs.getLong("request_count")));
+                }
+                return list;
+            } finally {
+                rs.close();
+            }
+        } finally {
+            ps.close();
+        }
+    }
+
+    private static List<TopDepartment> queryTopDepartments(java.sql.Connection connection,
+                                                           String today)
+            throws SQLException {
+        PreparedStatement ps = connection.prepareStatement(
+                "SELECT COALESCE(k.department, 'FTD') AS department, "
+                        + "COALESCE(SUM(u.total_tokens), 0) AS total_tokens, "
+                        + "COALESCE(SUM(u.request_count), 0) AS request_count "
+                        + "FROM usage_daily u LEFT JOIN api_keys k ON u.api_key = k.api_key "
+                        + "WHERE u.usage_date = ? "
+                        + "GROUP BY COALESCE(k.department, 'FTD') "
+                        + "ORDER BY total_tokens DESC, request_count DESC LIMIT 10");
+        try {
+            ps.setString(1, today);
+            ResultSet rs = ps.executeQuery();
+            try {
+                List<TopDepartment> list = new ArrayList<TopDepartment>();
+                while (rs.next()) {
+                    list.add(new TopDepartment(
+                            rs.getString("department"),
                             rs.getLong("total_tokens"),
                             rs.getLong("request_count")));
                 }
@@ -438,6 +487,45 @@ public final class AdminUsageQuery {
         }
     }
 
+    public String queryByDepartmentJson(String department, String from, String to) {
+        try {
+            final String dept = department == null ? "" : department.trim();
+            List<Row> rows = db.withConnection(new SqliteDatabase.SqlWork<List<Row>>() {
+                @Override
+                public List<Row> run(java.sql.Connection connection) throws SQLException {
+                    StringBuilder sql = new StringBuilder(
+                            "SELECT u.usage_date AS usage_date, u.model AS model, "
+                                    + "SUM(u.request_count) AS request_count, "
+                                    + "SUM(u.prompt_tokens) AS prompt_tokens, "
+                                    + "SUM(u.completion_tokens) AS completion_tokens, "
+                                    + "SUM(u.total_tokens) AS total_tokens "
+                                    + "FROM usage_daily u "
+                                    + "LEFT JOIN api_keys k ON u.api_key = k.api_key "
+                                    + "WHERE 1=1");
+                    List<String> params = new ArrayList<String>();
+                    if (!dept.isEmpty()) {
+                        sql.append(" AND COALESCE(k.department, 'FTD') = ?");
+                        params.add(dept);
+                    }
+                    if (from != null && !from.isEmpty()) {
+                        sql.append(" AND u.usage_date >= ?");
+                        params.add(from);
+                    }
+                    if (to != null && !to.isEmpty()) {
+                        sql.append(" AND u.usage_date <= ?");
+                        params.add(to);
+                    }
+                    sql.append(" GROUP BY u.usage_date, u.model ORDER BY u.model ASC, u.usage_date ASC");
+                    return queryRows(connection, sql.toString(), params);
+                }
+            });
+            return toModelsJson(rows);
+        } catch (SQLException e) {
+            log.warn("queryByDepartment failed: {}", e.getMessage());
+            return "{\"models\":[],\"error\":\"" + escape(e.getMessage()) + "\"}";
+        }
+    }
+
     /**
      * Top N by total_tokens for names (api keys) and groups within an optional date range.
      * {@code limit <= 0} means no LIMIT (return all ranked rows).
@@ -452,6 +540,7 @@ public final class AdminUsageQuery {
                             "SELECT u.api_key AS api_key, "
                                     + "COALESCE(NULLIF(k.name, ''), u.api_key) AS name, "
                                     + "COALESCE(k.group_name, 'default') AS group_name, "
+                                    + "COALESCE(k.department, 'FTD') AS department, "
                                     + "SUM(u.request_count) AS request_count, "
                                     + "SUM(u.prompt_tokens) AS prompt_tokens, "
                                     + "SUM(u.completion_tokens) AS completion_tokens, "
@@ -483,6 +572,7 @@ public final class AdminUsageQuery {
                                         rs.getString("api_key"),
                                         rs.getString("name"),
                                         rs.getString("group_name"),
+                                        rs.getString("department"),
                                         rs.getLong("request_count"),
                                         rs.getLong("prompt_tokens"),
                                         rs.getLong("completion_tokens"),
@@ -548,10 +638,62 @@ public final class AdminUsageQuery {
                 }
             });
 
-            return toRankJson(names, groups);
+            List<DepartmentRank> departments = db.withConnection(
+                    new SqliteDatabase.SqlWork<List<DepartmentRank>>() {
+                @Override
+                public List<DepartmentRank> run(java.sql.Connection connection) throws SQLException {
+                    StringBuilder sql = new StringBuilder(
+                            "SELECT COALESCE(k.department, 'FTD') AS department, "
+                                    + "SUM(u.request_count) AS request_count, "
+                                    + "SUM(u.prompt_tokens) AS prompt_tokens, "
+                                    + "SUM(u.completion_tokens) AS completion_tokens, "
+                                    + "SUM(u.total_tokens) AS total_tokens "
+                                    + "FROM usage_daily u "
+                                    + "LEFT JOIN api_keys k ON u.api_key = k.api_key "
+                                    + "WHERE 1=1");
+                    List<String> params = new ArrayList<String>();
+                    appendDateFiltersPrefixed(sql, params, "u.", from, to);
+                    sql.append(" GROUP BY COALESCE(k.department, 'FTD') "
+                            + "ORDER BY total_tokens DESC, request_count DESC");
+                    if (top > 0) {
+                        sql.append(" LIMIT ?");
+                    }
+                    PreparedStatement ps = connection.prepareStatement(sql.toString());
+                    try {
+                        for (int i = 0; i < params.size(); i++) {
+                            ps.setString(i + 1, params.get(i));
+                        }
+                        if (top > 0) {
+                            ps.setInt(params.size() + 1, top);
+                        }
+                        ResultSet rs = ps.executeQuery();
+                        try {
+                            List<DepartmentRank> list = new ArrayList<DepartmentRank>();
+                            int rank = 1;
+                            while (rs.next()) {
+                                list.add(new DepartmentRank(
+                                        rank++,
+                                        rs.getString("department"),
+                                        rs.getLong("request_count"),
+                                        rs.getLong("prompt_tokens"),
+                                        rs.getLong("completion_tokens"),
+                                        rs.getLong("total_tokens")));
+                            }
+                            return list;
+                        } finally {
+                            rs.close();
+                        }
+                    } finally {
+                        ps.close();
+                    }
+                }
+            });
+
+            return toRankJson(names, groups, departments);
         } catch (SQLException e) {
             log.warn("queryRank failed: {}", e.getMessage());
-            return "{\"by_name\":[],\"by_group\":[],\"error\":\"" + escape(e.getMessage()) + "\"}";
+            return "{\"by_name\":[],\"by_group\":[],\"by_department\":[],\"error\":\""
+                    + escape(e.getMessage()) + "\"}";
         }
     }
 
@@ -679,7 +821,8 @@ public final class AdminUsageQuery {
         }
     }
 
-    private static String toRankJson(List<NameRank> names, List<GroupRank> groups) {
+    private static String toRankJson(List<NameRank> names, List<GroupRank> groups,
+                                     List<DepartmentRank> departments) {
         StringBuilder sb = new StringBuilder(512);
         sb.append("{\"by_name\":[");
         for (int i = 0; i < names.size(); i++) {
@@ -691,6 +834,7 @@ public final class AdminUsageQuery {
                     .append(",\"api_key\":\"").append(escape(n.apiKey)).append("\"")
                     .append(",\"name\":\"").append(escape(n.name)).append("\"")
                     .append(",\"group_name\":\"").append(escape(n.groupName)).append("\"")
+                    .append(",\"department\":\"").append(escape(n.department)).append("\"")
                     .append(",\"request_count\":").append(n.requestCount)
                     .append(",\"prompt_tokens\":").append(n.promptTokens)
                     .append(",\"completion_tokens\":").append(n.completionTokens)
@@ -709,6 +853,20 @@ public final class AdminUsageQuery {
                     .append(",\"prompt_tokens\":").append(g.promptTokens)
                     .append(",\"completion_tokens\":").append(g.completionTokens)
                     .append(",\"total_tokens\":").append(g.totalTokens)
+                    .append('}');
+        }
+        sb.append("],\"by_department\":[");
+        for (int i = 0; i < departments.size(); i++) {
+            if (i > 0) {
+                sb.append(',');
+            }
+            DepartmentRank d = departments.get(i);
+            sb.append("{\"rank\":").append(d.rank)
+                    .append(",\"department\":\"").append(escape(d.department)).append("\"")
+                    .append(",\"request_count\":").append(d.requestCount)
+                    .append(",\"prompt_tokens\":").append(d.promptTokens)
+                    .append(",\"completion_tokens\":").append(d.completionTokens)
+                    .append(",\"total_tokens\":").append(d.totalTokens)
                     .append('}');
         }
         sb.append("]}");
@@ -827,17 +985,19 @@ public final class AdminUsageQuery {
         final String apiKey;
         final String name;
         final String groupName;
+        final String department;
         final long requestCount;
         final long promptTokens;
         final long completionTokens;
         final long totalTokens;
 
-        NameRank(int rank, String apiKey, String name, String groupName,
+        NameRank(int rank, String apiKey, String name, String groupName, String department,
                  long requestCount, long promptTokens, long completionTokens, long totalTokens) {
             this.rank = rank;
             this.apiKey = apiKey;
             this.name = name;
             this.groupName = groupName;
+            this.department = department;
             this.requestCount = requestCount;
             this.promptTokens = promptTokens;
             this.completionTokens = completionTokens;
@@ -857,6 +1017,25 @@ public final class AdminUsageQuery {
                   long completionTokens, long totalTokens) {
             this.rank = rank;
             this.groupName = groupName;
+            this.requestCount = requestCount;
+            this.promptTokens = promptTokens;
+            this.completionTokens = completionTokens;
+            this.totalTokens = totalTokens;
+        }
+    }
+
+    private static final class DepartmentRank {
+        final int rank;
+        final String department;
+        final long requestCount;
+        final long promptTokens;
+        final long completionTokens;
+        final long totalTokens;
+
+        DepartmentRank(int rank, String department, long requestCount, long promptTokens,
+                       long completionTokens, long totalTokens) {
+            this.rank = rank;
+            this.department = department;
             this.requestCount = requestCount;
             this.promptTokens = promptTokens;
             this.completionTokens = completionTokens;
@@ -922,12 +1101,27 @@ public final class AdminUsageQuery {
     private static final class TopUser {
         final String name;
         final String groupName;
+        final String department;
         final long totalTokens;
         final long requestCount;
 
-        TopUser(String name, String groupName, long totalTokens, long requestCount) {
+        TopUser(String name, String groupName, String department,
+                long totalTokens, long requestCount) {
             this.name = name;
             this.groupName = groupName;
+            this.department = department;
+            this.totalTokens = totalTokens;
+            this.requestCount = requestCount;
+        }
+    }
+
+    private static final class TopDepartment {
+        final String department;
+        final long totalTokens;
+        final long requestCount;
+
+        TopDepartment(String department, long totalTokens, long requestCount) {
+            this.department = department;
             this.totalTokens = totalTokens;
             this.requestCount = requestCount;
         }

@@ -1,6 +1,13 @@
 import { FormEvent, useEffect, useState } from "react";
 import { Plus, RefreshCw } from "lucide-react";
-import { ApiKeyRow, createKey, fetchGroups, fetchKeys, updateKey } from "../api";
+import {
+  ApiKeyRow,
+  createKey,
+  fetchDepartments,
+  fetchGroups,
+  fetchKeys,
+  updateKey,
+} from "../api";
 
 const PAGE_SIZE = 20;
 const TOKENS_PER_MILLION = 1_000_000;
@@ -35,24 +42,31 @@ export default function KeysPage() {
   const [qInput, setQInput] = useState("");
   const [q, setQ] = useState("");
   const [group, setGroup] = useState("");
+  const [department, setDepartment] = useState("");
   const [enabledFilter, setEnabledFilter] = useState<"all" | "1" | "0">("all");
   const [groups, setGroups] = useState<string[]>([]);
+  const [departments, setDepartments] = useState<string[]>([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [groupName, setGroupName] = useState("default");
+  const [departmentName, setDepartmentName] = useState("FTD");
   const [customKey, setCustomKey] = useState("");
   const [enabled, setEnabled] = useState(true);
   const [limitMillions, setLimitMillions] = useState("0");
   const [editing, setEditing] = useState<ApiKeyRow | null>(null);
   const [editName, setEditName] = useState("");
   const [editGroupName, setEditGroupName] = useState("default");
+  const [editDepartment, setEditDepartment] = useState("FTD");
   const [editLimitMillions, setEditLimitMillions] = useState("0");
 
   useEffect(() => {
     fetchGroups()
       .then(setGroups)
+      .catch(() => {});
+    fetchDepartments()
+      .then(setDepartments)
       .catch(() => {});
   }, []);
 
@@ -71,6 +85,7 @@ export default function KeysPage() {
       const res = await fetchKeys({
         q: q || undefined,
         group: group || undefined,
+        department: department || undefined,
         enabled: enabledFilter === "all" ? undefined : enabledFilter === "1",
         page: targetPage,
         page_size: PAGE_SIZE,
@@ -88,7 +103,7 @@ export default function KeysPage() {
   useEffect(() => {
     load(page);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q, group, enabledFilter, page]);
+  }, [q, group, department, enabledFilter, page]);
 
   async function onCreate(e: FormEvent) {
     e.preventDefault();
@@ -97,6 +112,7 @@ export default function KeysPage() {
       await createKey({
         name: name || "unnamed",
         group_name: groupName || "default",
+        department: departmentName.trim() || "FTD",
         api_key: customKey || undefined,
         enabled,
         monthly_token_limit: millionsInputToLimit(limitMillions),
@@ -104,12 +120,14 @@ export default function KeysPage() {
       setOpen(false);
       setName("");
       setGroupName("default");
+      setDepartmentName("FTD");
       setCustomKey("");
       setEnabled(true);
       setLimitMillions("0");
       if (page !== 1) setPage(1);
       else await load(1);
       fetchGroups().then(setGroups).catch(() => {});
+      fetchDepartments().then(setDepartments).catch(() => {});
     } catch (err: any) {
       setError(err?.message || "创建失败");
     }
@@ -128,6 +146,7 @@ export default function KeysPage() {
     setEditing(row);
     setEditName(row.name);
     setEditGroupName(row.group_name || "default");
+    setEditDepartment(row.department || "FTD");
     setEditLimitMillions(limitToMillionsInput(row.monthly_token_limit || 0));
     setError("");
   }
@@ -141,11 +160,13 @@ export default function KeysPage() {
         api_key: editing.api_key,
         name: editName.trim() || "unnamed",
         group_name: editGroupName.trim() || "default",
+        department: editDepartment.trim() || "FTD",
         monthly_token_limit: millionsInputToLimit(editLimitMillions),
       });
       setEditing(null);
       await load(page);
       fetchGroups().then(setGroups).catch(() => {});
+      fetchDepartments().then(setDepartments).catch(() => {});
     } catch (err: any) {
       setError(err?.message || "更新失败");
     }
@@ -206,6 +227,24 @@ export default function KeysPage() {
           </select>
         </div>
         <div className="space-y-1">
+          <label className="text-xs text-slate-500">部门</label>
+          <select
+            className="h-9 min-w-[140px] px-2 rounded-lg border border-slate-200 text-sm"
+            value={department}
+            onChange={(e) => {
+              setDepartment(e.target.value);
+              setPage(1);
+            }}
+          >
+            <option value="">全部</option>
+            {departments.map((d) => (
+              <option key={d} value={d}>
+                {d}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="space-y-1">
           <label className="text-xs text-slate-500">状态</label>
           <select
             className="h-9 min-w-[100px] px-2 rounded-lg border border-slate-200 text-sm"
@@ -235,6 +274,7 @@ export default function KeysPage() {
               <th className="px-4 py-3 font-medium">API Key</th>
               <th className="px-4 py-3 font-medium">名称</th>
               <th className="px-4 py-3 font-medium">组别</th>
+              <th className="px-4 py-3 font-medium">部门</th>
               <th className="px-4 py-3 font-medium">月限额</th>
               <th className="px-4 py-3 font-medium">本月已用</th>
               <th className="px-4 py-3 font-medium">状态</th>
@@ -244,7 +284,7 @@ export default function KeysPage() {
           <tbody>
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={7} className="px-4 py-10 text-center text-slate-400">
+                <td colSpan={8} className="px-4 py-10 text-center text-slate-400">
                   {loading ? "加载中…" : "暂无 Key，点击右上角新增或调整筛选条件"}
                 </td>
               </tr>
@@ -260,6 +300,11 @@ export default function KeysPage() {
                     <td className="px-4 py-3">
                       <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 text-xs">
                         {row.group_name}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className="px-2 py-0.5 rounded-full bg-sky-50 text-sky-700 text-xs">
+                        {row.department || "FTD"}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-slate-700">{formatLimitM(limit)}</td>
@@ -347,6 +392,15 @@ export default function KeysPage() {
               />
             </div>
             <div className="space-y-2">
+              <label className="text-sm text-slate-600">部门 department</label>
+              <input
+                className="w-full h-10 px-3 rounded-lg border border-slate-200"
+                value={departmentName}
+                onChange={(e) => setDepartmentName(e.target.value)}
+                placeholder="FTD"
+              />
+            </div>
+            <div className="space-y-2">
               <label className="text-sm text-slate-600">自定义 Key（可选，留空自动生成）</label>
               <input
                 className="w-full h-10 px-3 rounded-lg border border-slate-200 font-mono text-xs"
@@ -418,6 +472,15 @@ export default function KeysPage() {
                 value={editGroupName}
                 onChange={(e) => setEditGroupName(e.target.value)}
                 placeholder="default"
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm text-slate-600">部门 department</label>
+              <input
+                className="w-full h-10 px-3 rounded-lg border border-slate-200"
+                value={editDepartment}
+                onChange={(e) => setEditDepartment(e.target.value)}
+                placeholder="FTD"
               />
             </div>
             <div className="space-y-2">

@@ -2,6 +2,7 @@ export type ApiKeyRow = {
   api_key: string;
   name: string;
   group_name: string;
+  department: string;
   enabled: boolean;
   monthly_token_limit: number;
   month_used_tokens?: number;
@@ -77,6 +78,7 @@ export const logout = () => api<{ ok: boolean }>("/logout", { method: "POST" });
 export const fetchKeys = (params?: {
   q?: string;
   group?: string;
+  department?: string;
   enabled?: boolean;
   page?: number;
   page_size?: number;
@@ -84,6 +86,7 @@ export const fetchKeys = (params?: {
   const q = new URLSearchParams();
   if (params?.q) q.set("q", params.q);
   if (params?.group) q.set("group", params.group);
+  if (params?.department) q.set("department", params.department);
   if (params?.enabled !== undefined) q.set("enabled", params.enabled ? "1" : "0");
   if (params?.page !== undefined) q.set("page", String(params.page));
   if (params?.page_size !== undefined) q.set("page_size", String(params.page_size));
@@ -95,6 +98,7 @@ export const createKey = (body: {
   api_key?: string;
   name: string;
   group_name: string;
+  department?: string;
   enabled: boolean;
   monthly_token_limit?: number;
 }) =>
@@ -107,6 +111,7 @@ export const updateKey = (body: {
   api_key: string;
   name?: string;
   group_name?: string;
+  department?: string;
   enabled?: boolean;
   monthly_token_limit?: number;
 }) =>
@@ -116,6 +121,8 @@ export const updateKey = (body: {
   });
 
 export const fetchGroups = () => api<string[]>("/groups");
+
+export const fetchDepartments = () => api<string[]>("/departments");
 
 export const fetchUsageByKey = (apiKey: string, from?: string, to?: string) => {
   const q = new URLSearchParams({ api_key: apiKey });
@@ -132,6 +139,14 @@ export const fetchUsageByGroup = (groupName: string, from?: string, to?: string)
   return api<UsageChartResponse>(`/usage/by-group?${q}`);
 };
 
+export const fetchUsageByDepartment = (department: string, from?: string, to?: string) => {
+  const q = new URLSearchParams();
+  if (department) q.set("department", department);
+  if (from) q.set("from", from);
+  if (to) q.set("to", to);
+  return api<UsageChartResponse>(`/usage/by-department?${q}`);
+};
+
 /** All keys aggregated; reuses by-group without group filter. */
 export const fetchUsageAll = (from?: string, to?: string) =>
   fetchUsageByGroup("", from, to);
@@ -141,6 +156,7 @@ export type UsageNameRank = {
   api_key: string;
   name: string;
   group_name: string;
+  department: string;
   request_count: number;
   prompt_tokens: number;
   completion_tokens: number;
@@ -156,9 +172,19 @@ export type UsageGroupRank = {
   total_tokens: number;
 };
 
+export type UsageDepartmentRank = {
+  rank: number;
+  department: string;
+  request_count: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+};
+
 export type UsageRankResponse = {
   by_name: UsageNameRank[];
   by_group: UsageGroupRank[];
+  by_department: UsageDepartmentRank[];
 };
 
 export const fetchUsageRank = (from?: string, to?: string, limit = 10) => {
@@ -220,6 +246,13 @@ export type OverviewLatencyPoint = {
 export type OverviewTopUser = {
   name: string;
   group_name: string;
+  department: string;
+  total_tokens: number;
+  request_count: number;
+};
+
+export type OverviewTopDepartment = {
+  department: string;
   total_tokens: number;
   request_count: number;
 };
@@ -235,6 +268,7 @@ export type OverviewResponse = {
   token_trend_7d: OverviewTrendPoint[];
   latency_24h: OverviewLatencyPoint[];
   top_users_today: OverviewTopUser[];
+  top_departments_today: OverviewTopDepartment[];
   token_breakdown_today: OverviewTokenBreakdown;
 };
 

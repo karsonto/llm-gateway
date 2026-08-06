@@ -69,6 +69,18 @@ public final class InMemoryApiKeyStore implements ApiKeyStore {
     }
 
     @Override
+    public String resolveDepartment(String key) {
+        if (key == null || ANONYMOUS_KEY.equals(key)) {
+            return ANONYMOUS_KEY;
+        }
+        ApiKeyInfo info = find(key);
+        if (info != null) {
+            return info.getDepartment();
+        }
+        return "FTD";
+    }
+
+    @Override
     public Map<String, ApiKeyInfo> getKeys() {
         return keys;
     }

@@ -29,6 +29,11 @@ public interface ApiKeyStore {
      */
     String resolveGroupName(String key);
 
+    /**
+     * Display department for the key. Unknown / anonymous keys return {@code "FTD"} or anonymous.
+     */
+    String resolveDepartment(String key);
+
     Map<String, ApiKeyInfo> getKeys();
 
     /**

@@ -2,15 +2,17 @@ import { useEffect, useState } from "react";
 import {
   ApiKeyRow,
   ModelUsageBlock,
+  fetchDepartments,
   fetchGroups,
   fetchKeys,
   fetchUsageAll,
+  fetchUsageByDepartment,
   fetchUsageByGroup,
   fetchUsageByKey,
 } from "../api";
 import { ModelUsageCharts } from "../components/ModelUsageCharts";
 
-type Dimension = "name" | "group" | "all";
+type Dimension = "name" | "group" | "department" | "all";
 
 function today() {
   return new Date().toISOString().slice(0, 10);
@@ -26,8 +28,10 @@ export default function UsagePage() {
   const [dimension, setDimension] = useState<Dimension>("name");
   const [keys, setKeys] = useState<ApiKeyRow[]>([]);
   const [groups, setGroups] = useState<string[]>([]);
+  const [departments, setDepartments] = useState<string[]>([]);
   const [apiKey, setApiKey] = useState("");
   const [groupName, setGroupName] = useState("");
+  const [department, setDepartment] = useState("");
   const [from, setFrom] = useState(daysAgo(29));
   const [to, setTo] = useState(today());
   const [blocks, setBlocks] = useState<ModelUsageBlock[]>([]);
@@ -52,12 +56,20 @@ export default function UsagePage() {
           setGroupName(list.length ? list[0] : "");
         })
         .catch((e) => setError(e.message));
+    } else if (dimension === "department") {
+      fetchDepartments()
+        .then((list) => {
+          setDepartments(list);
+          setDepartment(list.length ? list[0] : "");
+        })
+        .catch((e) => setError(e.message));
     }
   }, [dimension]);
 
   async function load() {
     if (dimension === "name" && !apiKey) return;
     if (dimension === "group" && !groupName) return;
+    if (dimension === "department" && !department) return;
     setLoading(true);
     setError("");
     try {
@@ -66,7 +78,9 @@ export default function UsagePage() {
           ? await fetchUsageByKey(apiKey, from, to)
           : dimension === "group"
             ? await fetchUsageByGroup(groupName, from, to)
-            : await fetchUsageAll(from, to);
+            : dimension === "department"
+              ? await fetchUsageByDepartment(department, from, to)
+              : await fetchUsageAll(from, to);
       setBlocks(res.models || []);
     } catch (e: any) {
       setError(e?.message || "查询失败");
@@ -78,11 +92,18 @@ export default function UsagePage() {
   useEffect(() => {
     if (dimension === "name" && apiKey) load();
     else if (dimension === "group" && groupName) load();
+    else if (dimension === "department" && department) load();
     else if (dimension === "all") load();
-  }, [dimension, apiKey, groupName]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dimension, apiKey, groupName, department]);
 
   const canQuery =
-    dimension === "all" || (dimension === "name" ? !!apiKey : !!groupName);
+    dimension === "all" ||
+    (dimension === "name"
+      ? !!apiKey
+      : dimension === "group"
+        ? !!groupName
+        : !!department);
 
   const dimBtn = (value: Dimension, label: string, withBorder = false) => (
     <button
@@ -111,6 +132,7 @@ export default function UsagePage() {
           <div className="flex h-9 rounded-lg border border-slate-200 overflow-hidden text-sm">
             {dimBtn("name", "名字")}
             {dimBtn("group", "组别", true)}
+            {dimBtn("department", "部门", true)}
             {dimBtn("all", "全量", true)}
           </div>
         </div>
@@ -143,6 +165,23 @@ export default function UsagePage() {
               {groups.map((g) => (
                 <option key={g} value={g}>
                   {g}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {dimension === "department" && (
+          <div className="space-y-1">
+            <label className="text-xs text-slate-500">部门</label>
+            <select
+              className="h-9 min-w-[160px] px-2 rounded-lg border border-slate-200 text-sm"
+              value={department}
+              onChange={(e) => setDepartment(e.target.value)}
+            >
+              {departments.map((d) => (
+                <option key={d} value={d}>
+                  {d}
                 </option>
               ))}
             </select>
