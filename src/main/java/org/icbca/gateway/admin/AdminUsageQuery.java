@@ -488,6 +488,125 @@ public final class AdminUsageQuery {
         }
     }
 
+    public String queryByCategoryJson(String from, String to, String apiKeyFilter) {
+        try {
+            final String keyFilter = apiKeyFilter == null ? "" : apiKeyFilter.trim();
+            return db.withConnection(new SqliteDatabase.SqlWork<String>() {
+                @Override
+                public String run(java.sql.Connection connection) throws SQLException {
+                    List<String> params = new ArrayList<String>();
+                    StringBuilder where = new StringBuilder(" WHERE 1=1");
+                    if (!keyFilter.isEmpty()) {
+                        where.append(" AND api_key = ?");
+                        params.add(keyFilter);
+                    }
+                    if (from != null && !from.isEmpty()) {
+                        where.append(" AND usage_date >= ?");
+                        params.add(from);
+                    }
+                    if (to != null && !to.isEmpty()) {
+                        where.append(" AND usage_date <= ?");
+                        params.add(to);
+                    }
+
+                    PreparedStatement catPs = connection.prepareStatement(
+                            "SELECT category, COALESCE(SUM(request_count), 0) AS request_count "
+                                    + "FROM category_daily"
+                                    + where
+                                    + " GROUP BY category ORDER BY request_count DESC, category ASC");
+                    List<CatAgg> byCategory = new ArrayList<CatAgg>();
+                    try {
+                        for (int i = 0; i < params.size(); i++) {
+                            catPs.setString(i + 1, params.get(i));
+                        }
+                        ResultSet rs = catPs.executeQuery();
+                        try {
+                            while (rs.next()) {
+                                byCategory.add(new CatAgg(
+                                        rs.getString("category"), rs.getLong("request_count")));
+                            }
+                        } finally {
+                            rs.close();
+                        }
+                    } finally {
+                        catPs.close();
+                    }
+
+                    PreparedStatement userPs = connection.prepareStatement(
+                            "SELECT api_key, MAX(name) AS name, category, "
+                                    + "COALESCE(SUM(request_count), 0) AS request_count "
+                                    + "FROM category_daily"
+                                    + where
+                                    + " GROUP BY api_key, category "
+                                    + "ORDER BY api_key ASC, request_count DESC, category ASC");
+                    Map<String, UserCatAgg> byUser = new LinkedHashMap<String, UserCatAgg>();
+                    try {
+                        for (int i = 0; i < params.size(); i++) {
+                            userPs.setString(i + 1, params.get(i));
+                        }
+                        ResultSet rs = userPs.executeQuery();
+                        try {
+                            while (rs.next()) {
+                                String apiKey = rs.getString("api_key");
+                                UserCatAgg user = byUser.get(apiKey);
+                                if (user == null) {
+                                    user = new UserCatAgg(apiKey, rs.getString("name"));
+                                    byUser.put(apiKey, user);
+                                }
+                                long cnt = rs.getLong("request_count");
+                                user.requestCount += cnt;
+                                user.categories.add(new CatAgg(rs.getString("category"), cnt));
+                            }
+                        } finally {
+                            rs.close();
+                        }
+                    } finally {
+                        userPs.close();
+                    }
+
+                    StringBuilder sb = new StringBuilder(512);
+                    sb.append("{\"by_category\":[");
+                    for (int i = 0; i < byCategory.size(); i++) {
+                        if (i > 0) {
+                            sb.append(',');
+                        }
+                        CatAgg c = byCategory.get(i);
+                        sb.append("{\"category\":\"").append(escape(c.category)).append("\"")
+                                .append(",\"request_count\":").append(c.requestCount)
+                                .append('}');
+                    }
+                    sb.append("],\"by_user\":[");
+                    int ui = 0;
+                    for (UserCatAgg u : byUser.values()) {
+                        if (ui++ > 0) {
+                            sb.append(',');
+                        }
+                        sb.append("{\"api_key\":\"").append(escape(u.apiKey)).append("\"")
+                                .append(",\"name\":\"").append(escape(u.name)).append("\"")
+                                .append(",\"request_count\":").append(u.requestCount)
+                                .append(",\"categories\":[");
+                        for (int j = 0; j < u.categories.size(); j++) {
+                            if (j > 0) {
+                                sb.append(',');
+                            }
+                            CatAgg c = u.categories.get(j);
+                            sb.append("{\"category\":\"").append(escape(c.category)).append("\"")
+                                    .append(",\"request_count\":").append(c.requestCount)
+                                    .append('}');
+                        }
+                        sb.append("]}");
+                    }
+                    sb.append("]}");
+                    return sb.toString();
+                }
+            });
+        } catch (SQLException e) {
+            log.warn("queryByCategory failed: {}", e.getMessage());
+            return "{\"by_category\":[],\"by_user\":[],\"error\":\""
+                    + escape(e.getMessage()) + "\"}";
+        }
+    }
+
     public String queryByGroupJson(String groupName, String from, String to) {
         try {
             final String group = groupName == null ? "" : groupName.trim();
@@ -1265,6 +1384,28 @@ public final class AdminUsageQuery {
             return "";
         }
         return s.replace("\\", "\\\\").replace("\"", "\\\"");
+    }
+
+    private static final class CatAgg {
+        final String category;
+        final long requestCount;
+
+        CatAgg(String category, long requestCount) {
+            this.category = category;
+            this.requestCount = requestCount;
+        }
+    }
+
+    private static final class UserCatAgg {
+        final String apiKey;
+        final String name;
+        long requestCount;
+        final List<CatAgg> categories = new ArrayList<CatAgg>();
+
+        UserCatAgg(String apiKey, String name) {
+            this.apiKey = apiKey;
+            this.name = name == null ? "" : name;
+        }
     }
 
     private static final class Row {

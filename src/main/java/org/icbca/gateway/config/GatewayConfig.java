@@ -37,12 +37,16 @@ public final class GatewayConfig {
     private final String adminUsername;
     private final String adminPassword;
     private final String classificationCollectCsv;
+    private final String classificationClassifyUrl;
+    private final int classificationClassifyTimeoutMs;
+    private final int classificationClassifyWorkers;
     private final String configSource;
 
     public GatewayConfig(int port, String vllmHost, int vllmPort, int maxContentLength,
                          Set<String> pathWhitelist, Map<String, String> apiKeys, String sqlitePath,
                          String adminUsername, String adminPassword, String classificationCollectCsv,
-                         String configSource) {
+                         String classificationClassifyUrl, int classificationClassifyTimeoutMs,
+                         int classificationClassifyWorkers, String configSource) {
         this.port = port;
         this.vllmHost = vllmHost;
         this.vllmPort = vllmPort;
@@ -56,6 +60,12 @@ public final class GatewayConfig {
                 ? "admin123" : adminPassword;
         this.classificationCollectCsv = classificationCollectCsv == null
                 ? "" : classificationCollectCsv.trim();
+        this.classificationClassifyUrl = classificationClassifyUrl == null
+                ? "" : classificationClassifyUrl.trim();
+        this.classificationClassifyTimeoutMs = classificationClassifyTimeoutMs > 0
+                ? classificationClassifyTimeoutMs : 2000;
+        this.classificationClassifyWorkers = classificationClassifyWorkers > 0
+                ? classificationClassifyWorkers : 2;
         this.configSource = configSource == null ? "classpath:gateway.properties" : configSource;
     }
 
@@ -153,8 +163,28 @@ public final class GatewayConfig {
         String adminPassword = props.getProperty("gateway.admin.password", "admin123");
         String classificationCollectCsv =
                 props.getProperty("classification.collect.csv", "").trim();
+        String classificationClassifyUrl =
+                props.getProperty("classification.classify.url", "").trim();
+        int classificationClassifyTimeoutMs = parsePositiveInt(
+                props.getProperty("classification.classify.timeout.ms", "2000"), 2000);
+        int classificationClassifyWorkers = parsePositiveInt(
+                props.getProperty("classification.classify.workers", "2"), 2);
         return new GatewayConfig(port, vllmHost, vllmPort, maxContentLength, whitelist, apiKeys,
-                sqlitePath, adminUsername, adminPassword, classificationCollectCsv, configSource);
+                sqlitePath, adminUsername, adminPassword, classificationCollectCsv,
+                classificationClassifyUrl, classificationClassifyTimeoutMs,
+                classificationClassifyWorkers, configSource);
+    }
+
+    private static int parsePositiveInt(String raw, int fallback) {
+        if (raw == null || raw.trim().isEmpty()) {
+            return fallback;
+        }
+        try {
+            int v = Integer.parseInt(raw.trim());
+            return v > 0 ? v : fallback;
+        } catch (NumberFormatException e) {
+            return fallback;
+        }
     }
 
     static Map<String, String> parseApiKeys(String raw) {
@@ -237,6 +267,22 @@ public final class GatewayConfig {
         return classificationCollectCsv != null && !classificationCollectCsv.isEmpty();
     }
 
+    public String getClassificationClassifyUrl() {
+        return classificationClassifyUrl;
+    }
+
+    public boolean isClassificationClassifyEnabled() {
+        return classificationClassifyUrl != null && !classificationClassifyUrl.isEmpty();
+    }
+
+    public int getClassificationClassifyTimeoutMs() {
+        return classificationClassifyTimeoutMs;
+    }
+
+    public int getClassificationClassifyWorkers() {
+        return classificationClassifyWorkers;
+    }
+
     public String getConfigSource() {
         return configSource;
     }
@@ -251,6 +297,8 @@ public final class GatewayConfig {
                 + ", adminUsername=" + adminUsername
                 + ", classificationCollectCsv="
                 + (classificationCollectCsv.isEmpty() ? "(none)" : classificationCollectCsv)
+                + ", classificationClassifyUrl="
+                + (classificationClassifyUrl.isEmpty() ? "(none)" : classificationClassifyUrl)
                 + ", configSource=" + configSource
                 + ", apiKeysConfigured=" + !apiKeys.isEmpty()
                 + ", apiKeyCount=" + apiKeys.size()

@@ -158,6 +158,17 @@ public final class AdminApiHandler extends SimpleChannelInboundHandler<FullHttpR
                 return;
             }
 
+            if ("/usage/by-category".equals(sub) && HttpMethod.GET.equals(request.method())) {
+                if (!requireAuth(ctx, request)) {
+                    return;
+                }
+                Map<String, String> q = parseQuery(request.uri());
+                writeJson(ctx, HttpResponseStatus.OK,
+                        usageQuery.queryByCategoryJson(
+                                q.get("from"), q.get("to"), q.get("api_key")));
+                return;
+            }
+
             if ("/usage/rank".equals(sub) && HttpMethod.GET.equals(request.method())) {
                 if (!requireAuth(ctx, request)) {
                     return;
