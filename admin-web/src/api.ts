@@ -202,8 +202,7 @@ export type OverviewKpis = {
   today_tokens: number;
   month_tokens: number;
   today_active_users: number;
-  quota_near_count: number;
-  quota_exceeded_count: number;
+  month_requests: number;
 };
 
 export type OverviewTrendPoint = {
@@ -225,13 +224,9 @@ export type OverviewTopUser = {
   request_count: number;
 };
 
-export type OverviewQuotaAlert = {
-  api_key: string;
-  name: string;
-  limit: number;
-  used: number;
-  ratio: number;
-  status: "near" | "exceeded" | string;
+export type OverviewTokenBreakdown = {
+  prompt_tokens: number;
+  completion_tokens: number;
 };
 
 export type OverviewResponse = {
@@ -240,7 +235,7 @@ export type OverviewResponse = {
   token_trend_7d: OverviewTrendPoint[];
   latency_24h: OverviewLatencyPoint[];
   top_users_today: OverviewTopUser[];
-  quota_alerts: OverviewQuotaAlert[];
+  token_breakdown_today: OverviewTokenBreakdown;
 };
 
 export const fetchOverview = () => api<OverviewResponse>("/overview");
