@@ -52,7 +52,7 @@ export default function LatencyPage() {
       <div>
         <h1 className="text-xl font-semibold text-slate-800">响应延迟</h1>
         <p className="text-sm text-slate-500 mt-1">
-          按小时统计各模型平均 TTFT 与端到端响应时间
+          按小时统计各模型平均 TTFT/总耗时、最大响应与时段总延时
         </p>
       </div>
 
