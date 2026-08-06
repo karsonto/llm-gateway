@@ -7,7 +7,12 @@ import org.slf4j.LoggerFactory;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.time.YearMonth;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -18,11 +23,96 @@ import java.util.Map;
 public final class AdminUsageQuery {
 
     private static final Logger log = LoggerFactory.getLogger(AdminUsageQuery.class);
+    private static final DateTimeFormatter DAY = DateTimeFormatter.ISO_LOCAL_DATE;
 
     private final SqliteDatabase db;
+    private final ZoneId zoneId;
 
     public AdminUsageQuery(SqliteDatabase db) {
+        this(db, ZoneId.systemDefault());
+    }
+
+    public AdminUsageQuery(SqliteDatabase db, ZoneId zoneId) {
         this.db = db;
+        this.zoneId = zoneId != null ? zoneId : ZoneId.systemDefault();
+    }
+
+    /**
+     * Current calendar month total_tokens per api_key.
+     */
+    public Map<String, Long> sumTotalTokensByKeyForCurrentMonth() {
+        YearMonth ym = YearMonth.now(zoneId);
+        final String from = ym.atDay(1).format(DAY);
+        final String toExclusive = ym.plusMonths(1).atDay(1).format(DAY);
+        try {
+            return db.withConnection(new SqliteDatabase.SqlWork<Map<String, Long>>() {
+                @Override
+                public Map<String, Long> run(java.sql.Connection connection) throws SQLException {
+                    PreparedStatement ps = connection.prepareStatement(
+                            "SELECT api_key, COALESCE(SUM(total_tokens), 0) AS tokens "
+                                    + "FROM usage_daily WHERE usage_date >= ? AND usage_date < ? "
+                                    + "GROUP BY api_key");
+                    try {
+                        ps.setString(1, from);
+                        ps.setString(2, toExclusive);
+                        ResultSet rs = ps.executeQuery();
+                        try {
+                            Map<String, Long> map = new HashMap<String, Long>();
+                            while (rs.next()) {
+                                map.put(rs.getString("api_key"), Long.valueOf(rs.getLong("tokens")));
+                            }
+                            return map;
+                        } finally {
+                            rs.close();
+                        }
+                    } finally {
+                        ps.close();
+                    }
+                }
+            });
+        } catch (SQLException e) {
+            log.warn("sumTotalTokensByKeyForCurrentMonth failed: {}", e.getMessage());
+            return Collections.emptyMap();
+        }
+    }
+
+    public long sumTotalTokensForCurrentMonth(String apiKey) {
+        if (apiKey == null || apiKey.trim().isEmpty()) {
+            return 0L;
+        }
+        final String key = apiKey.trim();
+        YearMonth ym = YearMonth.now(zoneId);
+        final String from = ym.atDay(1).format(DAY);
+        final String toExclusive = ym.plusMonths(1).atDay(1).format(DAY);
+        try {
+            return db.withConnection(new SqliteDatabase.SqlWork<Long>() {
+                @Override
+                public Long run(java.sql.Connection connection) throws SQLException {
+                    PreparedStatement ps = connection.prepareStatement(
+                            "SELECT COALESCE(SUM(total_tokens), 0) FROM usage_daily "
+                                    + "WHERE api_key = ? AND usage_date >= ? AND usage_date < ?");
+                    try {
+                        ps.setString(1, key);
+                        ps.setString(2, from);
+                        ps.setString(3, toExclusive);
+                        ResultSet rs = ps.executeQuery();
+                        try {
+                            if (rs.next()) {
+                                return Long.valueOf(rs.getLong(1));
+                            }
+                            return Long.valueOf(0L);
+                        } finally {
+                            rs.close();
+                        }
+                    } finally {
+                        ps.close();
+                    }
+                }
+            }).longValue();
+        } catch (SQLException e) {
+            log.warn("sumTotalTokensForCurrentMonth failed: {}", e.getMessage());
+            return 0L;
+        }
     }
 
     public String queryByKeyJson(String apiKey, String from, String to) {
@@ -216,7 +306,8 @@ public final class AdminUsageQuery {
                 public List<LatencyRow> run(java.sql.Connection connection) throws SQLException {
                     StringBuilder sql = new StringBuilder(
                             "SELECT model, hour_bucket, request_count, latency_sum_ms, "
-                                    + "ttft_sum_ms, ttft_count FROM latency_hourly WHERE 1=1");
+                                    + "latency_max_ms, ttft_sum_ms, ttft_count "
+                                    + "FROM latency_hourly WHERE 1=1");
                     List<String> params = new ArrayList<String>();
                     appendHourBucketFilters(sql, params, from, to);
                     if (!modelFilter.isEmpty()) {
@@ -238,6 +329,7 @@ public final class AdminUsageQuery {
                                         rs.getString("hour_bucket"),
                                         rs.getLong("request_count"),
                                         rs.getLong("latency_sum_ms"),
+                                        rs.getLong("latency_max_ms"),
                                         rs.getLong("ttft_sum_ms"),
                                         rs.getLong("ttft_count")));
                             }
@@ -302,6 +394,8 @@ public final class AdminUsageQuery {
                         .append(",\"request_count\":").append(r.requestCount)
                         .append(",\"avg_ttft_ms\":").append(avgTtft)
                         .append(",\"avg_latency_ms\":").append(avgLatency)
+                        .append(",\"latency_sum_ms\":").append(r.latencySumMs)
+                        .append(",\"latency_max_ms\":").append(r.latencyMaxMs)
                         .append('}');
             }
             sb.append("]}");
@@ -518,15 +612,17 @@ public final class AdminUsageQuery {
         final String hourBucket;
         final long requestCount;
         final long latencySumMs;
+        final long latencyMaxMs;
         final long ttftSumMs;
         final long ttftCount;
 
         LatencyRow(String model, String hourBucket, long requestCount,
-                   long latencySumMs, long ttftSumMs, long ttftCount) {
+                   long latencySumMs, long latencyMaxMs, long ttftSumMs, long ttftCount) {
             this.model = model;
             this.hourBucket = hourBucket;
             this.requestCount = requestCount;
             this.latencySumMs = latencySumMs;
+            this.latencyMaxMs = latencyMaxMs;
             this.ttftSumMs = ttftSumMs;
             this.ttftCount = ttftCount;
         }

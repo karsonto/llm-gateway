@@ -48,23 +48,25 @@ public final class SqliteLatencyRecorder implements LatencyRecorder {
                     PreparedStatement ps = connection.prepareStatement(
                             "INSERT INTO latency_hourly "
                                     + "(model, hour_bucket, request_count, latency_sum_ms, "
-                                    + "ttft_sum_ms, ttft_count) "
-                                    + "VALUES (?, ?, 1, ?, ?, ?) "
+                                    + "latency_max_ms, ttft_sum_ms, ttft_count) "
+                                    + "VALUES (?, ?, 1, ?, ?, ?, ?) "
                                     + "ON CONFLICT(model, hour_bucket) DO UPDATE SET "
                                     + "request_count = request_count + 1, "
                                     + "latency_sum_ms = latency_sum_ms + excluded.latency_sum_ms, "
+                                    + "latency_max_ms = MAX(latency_max_ms, excluded.latency_max_ms), "
                                     + "ttft_sum_ms = ttft_sum_ms + excluded.ttft_sum_ms, "
                                     + "ttft_count = ttft_count + excluded.ttft_count");
                     try {
                         ps.setString(1, modelName);
                         ps.setString(2, hourBucket);
                         ps.setLong(3, latencyMs);
+                        ps.setLong(4, latencyMs);
                         if (ttftMs >= 0) {
-                            ps.setLong(4, ttftMs);
-                            ps.setLong(5, 1L);
+                            ps.setLong(5, ttftMs);
+                            ps.setLong(6, 1L);
                         } else {
-                            ps.setLong(4, 0L);
                             ps.setLong(5, 0L);
+                            ps.setLong(6, 0L);
                         }
                         ps.executeUpdate();
                     } finally {

@@ -56,10 +56,20 @@ export function ModelLatencyCharts({ blocks }: { blocks: ModelLatencyBlock[] }) 
                       tickLine={false}
                     />
                     <YAxis
+                      yAxisId="left"
                       tick={{ fill: "#64748b", fontSize: 11 }}
                       axisLine={false}
                       tickLine={false}
                       width={48}
+                      unit="ms"
+                    />
+                    <YAxis
+                      yAxisId="right"
+                      orientation="right"
+                      tick={{ fill: "#64748b", fontSize: 11 }}
+                      axisLine={false}
+                      tickLine={false}
+                      width={56}
                       unit="ms"
                     />
                     <Tooltip
@@ -75,6 +85,7 @@ export function ModelLatencyCharts({ blocks }: { blocks: ModelLatencyBlock[] }) 
                     />
                     <Legend />
                     <Line
+                      yAxisId="left"
                       type="monotone"
                       dataKey="avg_ttft_ms"
                       name="TTFT"
@@ -83,10 +94,29 @@ export function ModelLatencyCharts({ blocks }: { blocks: ModelLatencyBlock[] }) 
                       dot={false}
                     />
                     <Line
+                      yAxisId="left"
                       type="monotone"
                       dataKey="avg_latency_ms"
                       name="总耗时"
                       stroke="#f59e0b"
+                      strokeWidth={2}
+                      dot={false}
+                    />
+                    <Line
+                      yAxisId="left"
+                      type="monotone"
+                      dataKey="latency_max_ms"
+                      name="最大"
+                      stroke="#ef4444"
+                      strokeWidth={2}
+                      dot={false}
+                    />
+                    <Line
+                      yAxisId="right"
+                      type="monotone"
+                      dataKey="latency_sum_ms"
+                      name="总延时"
+                      stroke="#22c55e"
                       strokeWidth={2}
                       dot={false}
                     />

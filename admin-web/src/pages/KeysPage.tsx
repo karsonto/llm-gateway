@@ -3,6 +3,30 @@ import { Plus, RefreshCw } from "lucide-react";
 import { ApiKeyRow, createKey, fetchGroups, fetchKeys, updateKey } from "../api";
 
 const PAGE_SIZE = 20;
+const TOKENS_PER_MILLION = 1_000_000;
+
+function formatLimitM(limit: number) {
+  if (!limit || limit <= 0) return "不限";
+  return `${Math.round(limit / TOKENS_PER_MILLION)}M`;
+}
+
+function formatUsedM(used: number | undefined) {
+  const n = used || 0;
+  return `${(n / TOKENS_PER_MILLION).toFixed(2)}M`;
+}
+
+function limitToMillionsInput(limit: number) {
+  if (!limit || limit <= 0) return "0";
+  return String(Math.round(limit / TOKENS_PER_MILLION));
+}
+
+function millionsInputToLimit(raw: string) {
+  const trimmed = raw.trim();
+  if (!trimmed) return 0;
+  const n = Number(trimmed);
+  if (!Number.isFinite(n) || n < 0) return 0;
+  return Math.floor(n) * TOKENS_PER_MILLION;
+}
 
 export default function KeysPage() {
   const [rows, setRows] = useState<ApiKeyRow[]>([]);
@@ -20,9 +44,11 @@ export default function KeysPage() {
   const [groupName, setGroupName] = useState("default");
   const [customKey, setCustomKey] = useState("");
   const [enabled, setEnabled] = useState(true);
+  const [limitMillions, setLimitMillions] = useState("0");
   const [editing, setEditing] = useState<ApiKeyRow | null>(null);
   const [editName, setEditName] = useState("");
   const [editGroupName, setEditGroupName] = useState("default");
+  const [editLimitMillions, setEditLimitMillions] = useState("0");
 
   useEffect(() => {
     fetchGroups()
@@ -73,12 +99,14 @@ export default function KeysPage() {
         group_name: groupName || "default",
         api_key: customKey || undefined,
         enabled,
+        monthly_token_limit: millionsInputToLimit(limitMillions),
       });
       setOpen(false);
       setName("");
       setGroupName("default");
       setCustomKey("");
       setEnabled(true);
+      setLimitMillions("0");
       if (page !== 1) setPage(1);
       else await load(1);
       fetchGroups().then(setGroups).catch(() => {});
@@ -100,6 +128,7 @@ export default function KeysPage() {
     setEditing(row);
     setEditName(row.name);
     setEditGroupName(row.group_name || "default");
+    setEditLimitMillions(limitToMillionsInput(row.monthly_token_limit || 0));
     setError("");
   }
 
@@ -112,6 +141,7 @@ export default function KeysPage() {
         api_key: editing.api_key,
         name: editName.trim() || "unnamed",
         group_name: editGroupName.trim() || "default",
+        monthly_token_limit: millionsInputToLimit(editLimitMillions),
       });
       setEditing(null);
       await load(page);
@@ -205,6 +235,8 @@ export default function KeysPage() {
               <th className="px-4 py-3 font-medium">API Key</th>
               <th className="px-4 py-3 font-medium">名称</th>
               <th className="px-4 py-3 font-medium">组别</th>
+              <th className="px-4 py-3 font-medium">月限额</th>
+              <th className="px-4 py-3 font-medium">本月已用</th>
               <th className="px-4 py-3 font-medium">状态</th>
               <th className="px-4 py-3 font-medium">操作</th>
             </tr>
@@ -212,47 +244,56 @@ export default function KeysPage() {
           <tbody>
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={5} className="px-4 py-10 text-center text-slate-400">
+                <td colSpan={7} className="px-4 py-10 text-center text-slate-400">
                   {loading ? "加载中…" : "暂无 Key，点击右上角新增或调整筛选条件"}
                 </td>
               </tr>
             ) : (
-              rows.map((row) => (
-                <tr key={row.api_key} className="border-t border-slate-100">
-                  <td className="px-4 py-3 font-mono text-xs text-slate-700">{row.api_key}</td>
-                  <td className="px-4 py-3">{row.name}</td>
-                  <td className="px-4 py-3">
-                    <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 text-xs">
-                      {row.group_name}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <span
-                      className={`px-2 py-0.5 rounded-full text-xs ${
-                        row.enabled ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"
-                      }`}
-                    >
-                      {row.enabled ? "启用" : "禁用"}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-3">
-                      <button
-                        onClick={() => openEdit(row)}
-                        className="text-sky-600 hover:underline text-xs"
+              rows.map((row) => {
+                const limit = row.monthly_token_limit || 0;
+                const used = row.month_used_tokens || 0;
+                const over = limit > 0 && used >= limit;
+                return (
+                  <tr key={row.api_key} className="border-t border-slate-100">
+                    <td className="px-4 py-3 font-mono text-xs text-slate-700">{row.api_key}</td>
+                    <td className="px-4 py-3">{row.name}</td>
+                    <td className="px-4 py-3">
+                      <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 text-xs">
+                        {row.group_name}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-slate-700">{formatLimitM(limit)}</td>
+                    <td className={`px-4 py-3 ${over ? "text-rose-600 font-medium" : "text-slate-700"}`}>
+                      {formatUsedM(used)}
+                    </td>
+                    <td className="px-4 py-3">
+                      <span
+                        className={`px-2 py-0.5 rounded-full text-xs ${
+                          row.enabled ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"
+                        }`}
                       >
-                        编辑
-                      </button>
-                      <button
-                        onClick={() => toggleEnabled(row)}
-                        className="text-sky-600 hover:underline text-xs"
-                      >
-                        {row.enabled ? "禁用" : "启用"}
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))
+                        {row.enabled ? "启用" : "禁用"}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-3">
+                        <button
+                          onClick={() => openEdit(row)}
+                          className="text-sky-600 hover:underline text-xs"
+                        >
+                          编辑
+                        </button>
+                        <button
+                          onClick={() => toggleEnabled(row)}
+                          className="text-sky-600 hover:underline text-xs"
+                        >
+                          {row.enabled ? "禁用" : "启用"}
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })
             )}
           </tbody>
         </table>
@@ -314,6 +355,19 @@ export default function KeysPage() {
                 placeholder="sk-..."
               />
             </div>
+            <div className="space-y-2">
+              <label className="text-sm text-slate-600">月限额（百万 tokens / 月）</label>
+              <input
+                type="number"
+                min={0}
+                step={1}
+                className="w-full h-10 px-3 rounded-lg border border-slate-200"
+                value={limitMillions}
+                onChange={(e) => setLimitMillions(e.target.value)}
+                placeholder="0 = 不限"
+              />
+              <p className="text-xs text-slate-400">空或 0 表示不限；填 10 表示 1000 万 tokens</p>
+            </div>
             <label className="flex items-center gap-2 text-sm text-slate-600">
               <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
               启用
@@ -365,6 +419,19 @@ export default function KeysPage() {
                 onChange={(e) => setEditGroupName(e.target.value)}
                 placeholder="default"
               />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm text-slate-600">月限额（百万 tokens / 月）</label>
+              <input
+                type="number"
+                min={0}
+                step={1}
+                className="w-full h-10 px-3 rounded-lg border border-slate-200"
+                value={editLimitMillions}
+                onChange={(e) => setEditLimitMillions(e.target.value)}
+                placeholder="0 = 不限"
+              />
+              <p className="text-xs text-slate-400">空或 0 表示不限；填 10 表示 1000 万 tokens</p>
             </div>
             <div className="flex justify-end gap-2 pt-2">
               <button

@@ -4,6 +4,7 @@ import org.icbca.gateway.admin.AdminSessionStore;
 import org.icbca.gateway.auth.ApiKeyStore;
 import org.icbca.gateway.auth.AuthInspector;
 import org.icbca.gateway.auth.InMemoryApiKeyStore;
+import org.icbca.gateway.auth.MonthlyQuotaInspector;
 import org.icbca.gateway.auth.SqliteApiKeyStore;
 import org.icbca.gateway.config.GatewayConfig;
 import org.icbca.gateway.db.SqliteDatabase;
@@ -65,6 +66,9 @@ public final class Main {
 
         List<ChatRequestInspector> inspectors = new ArrayList<ChatRequestInspector>();
         inspectors.add(new AuthInspector(apiKeyStore));
+        if (config.isSqliteEnabled()) {
+            inspectors.add(new MonthlyQuotaInspector(apiKeyStore, usageRecorder));
+        }
         inspectors.add(new ClassificationInspector(csvCollector));
         inspectors.add(new LoggingInspector());
         InspectorPipeline pipeline = new InspectorPipeline(inspectors);

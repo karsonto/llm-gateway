@@ -7,6 +7,7 @@ import java.io.File;
 import java.io.IOException;
 import java.sql.Connection;
 import java.sql.DriverManager;
+import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 
@@ -60,11 +61,13 @@ public final class SqliteDatabase implements AutoCloseable {
                                 + "name TEXT NOT NULL,"
                                 + "group_name TEXT NOT NULL DEFAULT 'default',"
                                 + "enabled INTEGER NOT NULL DEFAULT 1,"
+                                + "monthly_token_limit INTEGER NOT NULL DEFAULT 0,"
                                 + "created_at TEXT NOT NULL DEFAULT (datetime('now')),"
                                 + "updated_at TEXT NOT NULL DEFAULT (datetime('now'))"
                                 + ")");
                 st.execute("CREATE INDEX IF NOT EXISTS idx_api_keys_enabled ON api_keys(enabled)");
                 st.execute("CREATE INDEX IF NOT EXISTS idx_api_keys_group ON api_keys(group_name)");
+                migrateApiKeysAddMonthlyTokenLimit(st);
                 st.execute(
                         "CREATE TABLE IF NOT EXISTS usage_daily ("
                                 + "id INTEGER PRIMARY KEY AUTOINCREMENT,"
@@ -89,6 +92,7 @@ public final class SqliteDatabase implements AutoCloseable {
                                 + "hour_bucket TEXT NOT NULL,"
                                 + "request_count INTEGER NOT NULL DEFAULT 0,"
                                 + "latency_sum_ms INTEGER NOT NULL DEFAULT 0,"
+                                + "latency_max_ms INTEGER NOT NULL DEFAULT 0,"
                                 + "ttft_sum_ms INTEGER NOT NULL DEFAULT 0,"
                                 + "ttft_count INTEGER NOT NULL DEFAULT 0,"
                                 + "UNIQUE (model, hour_bucket)"
@@ -99,9 +103,43 @@ public final class SqliteDatabase implements AutoCloseable {
                 st.execute(
                         "CREATE INDEX IF NOT EXISTS idx_latency_hourly_model "
                                 + "ON latency_hourly(model)");
+                migrateLatencyHourlyAddMaxMs(st);
             } finally {
                 st.close();
             }
+        }
+    }
+
+    private void migrateApiKeysAddMonthlyTokenLimit(Statement st) throws SQLException {
+        if (columnExists(st, "api_keys", "monthly_token_limit")) {
+            return;
+        }
+        st.execute(
+                "ALTER TABLE api_keys ADD COLUMN monthly_token_limit INTEGER NOT NULL DEFAULT 0");
+        log.info("migrated api_keys: added monthly_token_limit");
+    }
+
+    private void migrateLatencyHourlyAddMaxMs(Statement st) throws SQLException {
+        if (columnExists(st, "latency_hourly", "latency_max_ms")) {
+            return;
+        }
+        st.execute(
+                "ALTER TABLE latency_hourly ADD COLUMN latency_max_ms INTEGER NOT NULL DEFAULT 0");
+        log.info("migrated latency_hourly: added latency_max_ms");
+    }
+
+    private static boolean columnExists(Statement st, String table, String column)
+            throws SQLException {
+        ResultSet rs = st.executeQuery("PRAGMA table_info(" + table + ")");
+        try {
+            while (rs.next()) {
+                if (column.equalsIgnoreCase(rs.getString("name"))) {
+                    return true;
+                }
+            }
+            return false;
+        } finally {
+            rs.close();
         }
     }
 

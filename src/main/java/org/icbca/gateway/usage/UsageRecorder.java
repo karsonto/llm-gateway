@@ -41,4 +41,12 @@ public interface UsageRecorder {
      * @param dateFilter optional {@code yyyy-MM-dd}; null/empty = all dates
      */
     List<ApiKeyUsageSummary> getAllSummaries(String dateFilter);
+
+    /**
+     * Sum of {@code total_tokens} for one API key in a calendar month.
+     *
+     * @param apiKey    API key (null/empty treated as anonymous)
+     * @param yearMonth {@code yyyy-MM}
+     */
+    long sumTotalTokensForMonth(String apiKey, String yearMonth);
 }

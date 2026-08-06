@@ -3,6 +3,8 @@ export type ApiKeyRow = {
   name: string;
   group_name: string;
   enabled: boolean;
+  monthly_token_limit: number;
+  month_used_tokens?: number;
 };
 
 export type KeysPageResult = {
@@ -94,6 +96,7 @@ export const createKey = (body: {
   name: string;
   group_name: string;
   enabled: boolean;
+  monthly_token_limit?: number;
 }) =>
   api<ApiKeyRow>("/keys", {
     method: "POST",
@@ -105,6 +108,7 @@ export const updateKey = (body: {
   name?: string;
   group_name?: string;
   enabled?: boolean;
+  monthly_token_limit?: number;
 }) =>
   api<ApiKeyRow>("/keys", {
     method: "PATCH",
@@ -170,6 +174,8 @@ export type LatencyPoint = {
   request_count: number;
   avg_ttft_ms: number;
   avg_latency_ms: number;
+  latency_sum_ms: number;
+  latency_max_ms: number;
 };
 
 export type ModelLatencyBlock = {

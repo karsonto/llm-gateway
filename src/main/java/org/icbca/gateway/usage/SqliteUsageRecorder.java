@@ -201,6 +201,63 @@ public final class SqliteUsageRecorder implements UsageRecorder {
         return withGroup;
     }
 
+    @Override
+    public long sumTotalTokensForMonth(String apiKey, String yearMonth) {
+        final String key = normalizeApiKey(apiKey);
+        final String[] range = monthRange(yearMonth);
+        if (range == null) {
+            return 0L;
+        }
+        final String fromInclusive = range[0];
+        final String toExclusive = range[1];
+        try {
+            return db.withConnection(new SqliteDatabase.SqlWork<Long>() {
+                @Override
+                public Long run(java.sql.Connection connection) throws SQLException {
+                    PreparedStatement ps = connection.prepareStatement(
+                            "SELECT COALESCE(SUM(total_tokens), 0) FROM usage_daily "
+                                    + "WHERE api_key = ? AND usage_date >= ? AND usage_date < ?");
+                    try {
+                        ps.setString(1, key);
+                        ps.setString(2, fromInclusive);
+                        ps.setString(3, toExclusive);
+                        ResultSet rs = ps.executeQuery();
+                        try {
+                            if (rs.next()) {
+                                return Long.valueOf(rs.getLong(1));
+                            }
+                            return Long.valueOf(0L);
+                        } finally {
+                            rs.close();
+                        }
+                    } finally {
+                        ps.close();
+                    }
+                }
+            }).longValue();
+        } catch (SQLException e) {
+            log.warn("sumTotalTokensForMonth failed apiKey={}: {}", key, e.getMessage());
+            return 0L;
+        }
+    }
+
+    /**
+     * Returns [fromInclusive, toExclusive] as yyyy-MM-dd, or null if yearMonth invalid.
+     */
+    static String[] monthRange(String yearMonth) {
+        if (yearMonth == null || yearMonth.trim().isEmpty()) {
+            return null;
+        }
+        try {
+            java.time.YearMonth ym = java.time.YearMonth.parse(yearMonth.trim());
+            LocalDate start = ym.atDay(1);
+            LocalDate end = ym.plusMonths(1).atDay(1);
+            return new String[] { start.format(DAY), end.format(DAY) };
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
     private List<ApiKeyUsageStats> mapRows(ResultSet rs, String name) throws SQLException {
         List<ApiKeyUsageStats> list = new ArrayList<ApiKeyUsageStats>();
         while (rs.next()) {

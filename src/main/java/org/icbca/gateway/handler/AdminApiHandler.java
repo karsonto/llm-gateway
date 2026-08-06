@@ -209,8 +209,12 @@ public final class AdminApiHandler extends SimpleChannelInboundHandler<FullHttpR
             String name = text(root, "name");
             String group = text(root, "group_name");
             boolean enabled = !root.has("enabled") || root.get("enabled").asBoolean(true);
-            ApiKeyInfo info = sqliteKeyStore.create(apiKey, name, group, enabled);
-            writeJson(ctx, HttpResponseStatus.OK, keyToJson(info));
+            long monthlyLimit = 0L;
+            if (root.has("monthly_token_limit") && !root.get("monthly_token_limit").isNull()) {
+                monthlyLimit = Math.max(0L, root.get("monthly_token_limit").asLong(0L));
+            }
+            ApiKeyInfo info = sqliteKeyStore.create(apiKey, name, group, enabled, monthlyLimit);
+            writeJson(ctx, HttpResponseStatus.OK, keyToJson(info, 0L));
         } catch (SQLException e) {
             writeError(ctx, HttpResponseStatus.CONFLICT, "create_failed", e.getMessage());
         } catch (Exception e) {
@@ -226,8 +230,13 @@ public final class AdminApiHandler extends SimpleChannelInboundHandler<FullHttpR
             String name = root.has("name") ? text(root, "name") : null;
             String group = root.has("group_name") ? text(root, "group_name") : null;
             Boolean enabled = root.has("enabled") ? Boolean.valueOf(root.get("enabled").asBoolean()) : null;
-            ApiKeyInfo info = sqliteKeyStore.update(apiKey, name, group, enabled);
-            writeJson(ctx, HttpResponseStatus.OK, keyToJson(info));
+            Long monthlyLimit = null;
+            if (root.has("monthly_token_limit") && !root.get("monthly_token_limit").isNull()) {
+                monthlyLimit = Long.valueOf(Math.max(0L, root.get("monthly_token_limit").asLong(0L)));
+            }
+            ApiKeyInfo info = sqliteKeyStore.update(apiKey, name, group, enabled, monthlyLimit);
+            long used = usageQuery.sumTotalTokensForCurrentMonth(info.getKey());
+            writeJson(ctx, HttpResponseStatus.OK, keyToJson(info, used));
         } catch (SQLException e) {
             writeError(ctx, HttpResponseStatus.BAD_REQUEST, "update_failed", e.getMessage());
         } catch (Exception e) {
@@ -309,11 +318,12 @@ public final class AdminApiHandler extends SimpleChannelInboundHandler<FullHttpR
         int offset = (page - 1) * pageSize;
         int total = sqliteKeyStore.countPage(search, group, enabled);
         List<ApiKeyInfo> items = sqliteKeyStore.listPage(search, group, enabled, offset, pageSize);
+        Map<String, Long> monthUsed = usageQuery.sumTotalTokensByKeyForCurrentMonth();
         StringBuilder sb = new StringBuilder(256);
         sb.append("{\"total\":").append(total)
                 .append(",\"page\":").append(page)
                 .append(",\"page_size\":").append(pageSize)
-                .append(",\"items\":").append(keysToJson(items))
+                .append(",\"items\":").append(keysToJson(items, monthUsed))
                 .append('}');
         return sb.toString();
     }
@@ -351,24 +361,35 @@ public final class AdminApiHandler extends SimpleChannelInboundHandler<FullHttpR
         }
     }
 
-    private static String keysToJson(List<ApiKeyInfo> list) {
+    private static String keysToJson(List<ApiKeyInfo> list, Map<String, Long> monthUsed) {
         StringBuilder sb = new StringBuilder(256);
         sb.append('[');
         for (int i = 0; i < list.size(); i++) {
             if (i > 0) {
                 sb.append(',');
             }
-            sb.append(keyToJson(list.get(i)));
+            ApiKeyInfo info = list.get(i);
+            long used = 0L;
+            if (monthUsed != null && info.getKey() != null) {
+                Long v = monthUsed.get(info.getKey());
+                if (v != null) {
+                    used = v.longValue();
+                }
+            }
+            sb.append(keyToJson(info, used));
         }
         sb.append(']');
         return sb.toString();
     }
 
-    private static String keyToJson(ApiKeyInfo info) {
+    private static String keyToJson(ApiKeyInfo info, long monthUsedTokens) {
         return "{\"api_key\":\"" + escape(info.getKey())
                 + "\",\"name\":\"" + escape(info.getName())
                 + "\",\"group_name\":\"" + escape(info.getGroupName())
-                + "\",\"enabled\":" + info.isEnabled() + "}";
+                + "\",\"enabled\":" + info.isEnabled()
+                + ",\"monthly_token_limit\":" + info.getMonthlyTokenLimit()
+                + ",\"month_used_tokens\":" + monthUsedTokens
+                + "}";
     }
 
     private static String stringListJson(List<String> list) {

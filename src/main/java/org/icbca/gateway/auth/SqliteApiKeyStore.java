@@ -155,7 +155,7 @@ public final class SqliteApiKeyStore implements ApiKeyStore {
                 @Override
                 public List<ApiKeyInfo> run(java.sql.Connection connection) throws SQLException {
                     StringBuilder sql = new StringBuilder(
-                            "SELECT api_key, name, group_name, enabled FROM api_keys");
+                            "SELECT api_key, name, group_name, enabled, monthly_token_limit FROM api_keys");
                     List<Object> params = new ArrayList<Object>();
                     appendFilters(sql, params, q, group, enabled);
                     sql.append(" ORDER BY id LIMIT ? OFFSET ?");
@@ -169,11 +169,7 @@ public final class SqliteApiKeyStore implements ApiKeyStore {
                         try {
                             List<ApiKeyInfo> list = new ArrayList<ApiKeyInfo>();
                             while (rs.next()) {
-                                list.add(new ApiKeyInfo(
-                                        rs.getString("api_key"),
-                                        rs.getString("name"),
-                                        rs.getString("group_name"),
-                                        rs.getInt("enabled") != 0));
+                                list.add(mapRow(rs));
                             }
                             return list;
                         } finally {
@@ -266,8 +262,10 @@ public final class SqliteApiKeyStore implements ApiKeyStore {
 
     /**
      * Insert a new API key. If {@code apiKey} is null/blank, generates {@code sk-} + random.
+     * {@code monthlyTokenLimit <= 0} means unlimited.
      */
-    public ApiKeyInfo create(String apiKey, String name, String groupName, boolean enabled)
+    public ApiKeyInfo create(String apiKey, String name, String groupName, boolean enabled,
+                             long monthlyTokenLimit)
             throws SQLException {
         final String key = (apiKey == null || apiKey.trim().isEmpty())
                 ? generateApiKey() : apiKey.trim();
@@ -275,6 +273,7 @@ public final class SqliteApiKeyStore implements ApiKeyStore {
         final String group = (groupName == null || groupName.trim().isEmpty())
                 ? "default" : groupName.trim();
         final int en = enabled ? 1 : 0;
+        final long limit = monthlyTokenLimit < 0L ? 0L : monthlyTokenLimit;
 
         return db.withConnection(new SqliteDatabase.SqlWork<ApiKeyInfo>() {
             @Override
@@ -283,23 +282,31 @@ public final class SqliteApiKeyStore implements ApiKeyStore {
                     throw new SQLException("api_key already exists: " + key);
                 }
                 PreparedStatement ps = connection.prepareStatement(
-                        "INSERT INTO api_keys (api_key, name, group_name, enabled, created_at, updated_at) "
-                                + "VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))");
+                        "INSERT INTO api_keys (api_key, name, group_name, enabled, "
+                                + "monthly_token_limit, created_at, updated_at) "
+                                + "VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))");
                 try {
                     ps.setString(1, key);
                     ps.setString(2, nm);
                     ps.setString(3, group);
                     ps.setInt(4, en);
+                    ps.setLong(5, limit);
                     ps.executeUpdate();
                 } finally {
                     ps.close();
                 }
-                return new ApiKeyInfo(key, nm, group, enabled);
+                return new ApiKeyInfo(key, nm, group, enabled, limit);
             }
         });
     }
 
-    public ApiKeyInfo update(String apiKey, String name, String groupName, Boolean enabled)
+    public ApiKeyInfo create(String apiKey, String name, String groupName, boolean enabled)
+            throws SQLException {
+        return create(apiKey, name, groupName, enabled, 0L);
+    }
+
+    public ApiKeyInfo update(String apiKey, String name, String groupName, Boolean enabled,
+                             Long monthlyTokenLimit)
             throws SQLException {
         if (apiKey == null || apiKey.trim().isEmpty()) {
             throw new SQLException("api_key is required");
@@ -316,21 +323,31 @@ public final class SqliteApiKeyStore implements ApiKeyStore {
                 String group = groupName != null && !groupName.trim().isEmpty()
                         ? groupName.trim() : existing.getGroupName();
                 boolean en = enabled != null ? enabled.booleanValue() : existing.isEnabled();
+                long limit = monthlyTokenLimit != null
+                        ? (monthlyTokenLimit.longValue() < 0L ? 0L : monthlyTokenLimit.longValue())
+                        : existing.getMonthlyTokenLimit();
                 PreparedStatement ps = connection.prepareStatement(
                         "UPDATE api_keys SET name = ?, group_name = ?, enabled = ?, "
-                                + "updated_at = datetime('now') WHERE api_key = ?");
+                                + "monthly_token_limit = ?, updated_at = datetime('now') "
+                                + "WHERE api_key = ?");
                 try {
                     ps.setString(1, nm);
                     ps.setString(2, group);
                     ps.setInt(3, en ? 1 : 0);
-                    ps.setString(4, key);
+                    ps.setLong(4, limit);
+                    ps.setString(5, key);
                     ps.executeUpdate();
                 } finally {
                     ps.close();
                 }
-                return new ApiKeyInfo(key, nm, group, en);
+                return new ApiKeyInfo(key, nm, group, en, limit);
             }
         });
+    }
+
+    public ApiKeyInfo update(String apiKey, String name, String groupName, Boolean enabled)
+            throws SQLException {
+        return update(apiKey, name, groupName, enabled, null);
     }
 
     public List<String> listGroupNames() {
@@ -364,7 +381,8 @@ public final class SqliteApiKeyStore implements ApiKeyStore {
 
     private static ApiKeyInfo loadOne(java.sql.Connection connection, String key) throws SQLException {
         PreparedStatement ps = connection.prepareStatement(
-                "SELECT api_key, name, group_name, enabled FROM api_keys WHERE api_key = ?");
+                "SELECT api_key, name, group_name, enabled, monthly_token_limit "
+                        + "FROM api_keys WHERE api_key = ?");
         try {
             ps.setString(1, key);
             ResultSet rs = ps.executeQuery();
@@ -372,11 +390,7 @@ public final class SqliteApiKeyStore implements ApiKeyStore {
                 if (!rs.next()) {
                     return null;
                 }
-                return new ApiKeyInfo(
-                        rs.getString("api_key"),
-                        rs.getString("name"),
-                        rs.getString("group_name"),
-                        rs.getInt("enabled") != 0);
+                return mapRow(rs);
             } finally {
                 rs.close();
             }
@@ -390,14 +404,11 @@ public final class SqliteApiKeyStore implements ApiKeyStore {
         Statement st = connection.createStatement();
         try {
             ResultSet rs = st.executeQuery(
-                    "SELECT api_key, name, group_name, enabled FROM api_keys ORDER BY id");
+                    "SELECT api_key, name, group_name, enabled, monthly_token_limit "
+                            + "FROM api_keys ORDER BY id");
             try {
                 while (rs.next()) {
-                    list.add(new ApiKeyInfo(
-                            rs.getString("api_key"),
-                            rs.getString("name"),
-                            rs.getString("group_name"),
-                            rs.getInt("enabled") != 0));
+                    list.add(mapRow(rs));
                 }
             } finally {
                 rs.close();
@@ -406,6 +417,15 @@ public final class SqliteApiKeyStore implements ApiKeyStore {
             st.close();
         }
         return list;
+    }
+
+    private static ApiKeyInfo mapRow(ResultSet rs) throws SQLException {
+        return new ApiKeyInfo(
+                rs.getString("api_key"),
+                rs.getString("name"),
+                rs.getString("group_name"),
+                rs.getInt("enabled") != 0,
+                rs.getLong("monthly_token_limit"));
     }
 
     public static String generateApiKey() {

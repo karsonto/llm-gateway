@@ -134,6 +134,22 @@ public final class InMemoryUsageRecorder implements UsageRecorder {
         return withGroup;
     }
 
+    @Override
+    public long sumTotalTokensForMonth(String apiKey, String yearMonth) {
+        String key = normalizeApiKey(apiKey);
+        String prefix = yearMonth == null ? "" : yearMonth.trim();
+        if (prefix.length() != 7) {
+            return 0L;
+        }
+        long sum = 0L;
+        for (Counters c : byDimension.values()) {
+            if (key.equals(c.apiKey) && c.date != null && c.date.startsWith(prefix)) {
+                sum += c.totalTokens.sum();
+            }
+        }
+        return sum;
+    }
+
     private String resolveGroupName(String key) {
         if (apiKeyStore != null) {
             return apiKeyStore.resolveGroupName(key);
