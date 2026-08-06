@@ -24,6 +24,11 @@ public final class SseTokenParser {
     private ByteBuf carry;
     private boolean done;
     private TokenUsage usage;
+    private long firstTokenNanos = -1L;
+    private long lastTokenNanos = -1L;
+    private long intervalSumNanos;
+    private long intervalCount;
+    private long emittedChunks;
 
     public SseTokenParser(String requestId) {
         this.requestId = requestId;
@@ -31,6 +36,26 @@ public final class SseTokenParser {
 
     public TokenUsage getUsage() {
         return usage;
+    }
+
+    public TokenTimingStats snapshotTiming() {
+        return new TokenTimingStats(
+                firstTokenNanos, lastTokenNanos, intervalSumNanos, intervalCount, emittedChunks);
+    }
+
+    private void onTokenEmitted() {
+        long now = System.nanoTime();
+        if (firstTokenNanos < 0) {
+            firstTokenNanos = now;
+        } else if (lastTokenNanos >= 0) {
+            long delta = now - lastTokenNanos;
+            if (delta >= 0) {
+                intervalSumNanos += delta;
+                intervalCount++;
+            }
+        }
+        lastTokenNanos = now;
+        emittedChunks++;
     }
 
     /**
@@ -80,6 +105,7 @@ public final class SseTokenParser {
             JsonNode root = MAPPER.readTree(json);
             String text = extractMessageContent(root);
             if (text != null && !text.isEmpty()) {
+                onTokenEmitted();
                 log.info("requestId={} non-stream reply: {}", requestId, text);
             }
             TokenUsage parsed = parseUsage(root.get("usage"));
@@ -134,6 +160,7 @@ public final class SseTokenParser {
             JsonNode root = MAPPER.readTree(data);
             String token = extractDelta(root);
             if (token != null && !token.isEmpty()) {
+                onTokenEmitted();
                 assistantReply.append(token);
                 log.debug("requestId={} token={}", requestId, token);
             }

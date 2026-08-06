@@ -199,9 +199,20 @@ export type LatencyPoint = {
   bucket: string;
   request_count: number;
   avg_ttft_ms: number;
+  p50_ttft_ms: number;
+  p99_ttft_ms: number;
+  avg_tpot_ms: number;
+  p50_tpot_ms: number;
+  p99_tpot_ms: number;
+  avg_itl_ms: number;
+  p50_itl_ms: number;
+  p99_itl_ms: number;
   avg_latency_ms: number;
   latency_sum_ms: number;
   latency_max_ms: number;
+  request_tps: number;
+  output_tps: number;
+  total_token_tps: number;
 };
 
 export type ModelLatencyBlock = {
@@ -229,6 +240,18 @@ export type OverviewKpis = {
   month_tokens: number;
   today_active_users: number;
   month_requests: number;
+  avg_ttft_ms: number;
+  p50_ttft_ms: number;
+  p99_ttft_ms: number;
+  avg_tpot_ms: number;
+  p50_tpot_ms: number;
+  p99_tpot_ms: number;
+  avg_itl_ms: number;
+  p50_itl_ms: number;
+  p99_itl_ms: number;
+  request_tps: number;
+  output_tps: number;
+  total_token_tps: number;
 };
 
 export type OverviewTrendPoint = {
@@ -239,8 +262,20 @@ export type OverviewTrendPoint = {
 
 export type OverviewLatencyPoint = {
   bucket: string;
-  avg_latency_ms: number;
   request_count: number;
+  avg_latency_ms: number;
+  avg_ttft_ms: number;
+  p50_ttft_ms: number;
+  p99_ttft_ms: number;
+  avg_tpot_ms: number;
+  p50_tpot_ms: number;
+  p99_tpot_ms: number;
+  avg_itl_ms: number;
+  p50_itl_ms: number;
+  p99_itl_ms: number;
+  request_tps: number;
+  output_tps: number;
+  total_token_tps: number;
 };
 
 export type OverviewTopUser = {

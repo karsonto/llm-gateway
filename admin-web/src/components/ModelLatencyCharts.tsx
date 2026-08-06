@@ -8,7 +8,8 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { ModelLatencyBlock } from "../api";
+import { LatencyPoint, ModelLatencyBlock } from "../api";
+import { METRICS, metricTitle } from "../metricLabels";
 
 function formatNum(n: number) {
   return new Intl.NumberFormat("en-US").format(n);
@@ -21,33 +22,30 @@ function shortBucket(bucket: string) {
 }
 
 type ChartLine = {
-  dataKey: string;
+  dataKey: keyof LatencyPoint | string;
   name: string;
   stroke: string;
 };
 
-type ChartPoint = {
-  bucket: string;
-  label: string;
-  request_count: number;
-  avg_ttft_ms: number;
-  avg_latency_ms: number;
-  latency_sum_ms: number;
-  latency_max_ms: number;
-};
+type ChartPoint = LatencyPoint & { label: string };
 
 function LatencyLineChart({
   title,
+  subtitle,
   data,
   lines,
+  unit = "ms",
 }: {
   title: string;
+  subtitle?: string;
   data: ChartPoint[];
   lines: ChartLine[];
+  unit?: string;
 }) {
   return (
     <div className="rounded-xl bg-white text-slate-800 p-4 border border-slate-200 shadow-sm">
-      <h3 className="text-sm font-medium text-slate-600 mb-3">{title}</h3>
+      <h3 className="text-sm font-medium text-slate-600">{title}</h3>
+      {subtitle ? <p className="text-xs text-slate-400 mt-0.5 mb-2">{subtitle}</p> : <div className="mb-3" />}
       <div className="h-56">
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={data}>
@@ -62,8 +60,8 @@ function LatencyLineChart({
               tick={{ fill: "#64748b", fontSize: 11 }}
               axisLine={false}
               tickLine={false}
-              width={48}
-              unit="ms"
+              width={52}
+              unit={unit === "ms" ? "ms" : undefined}
             />
             <Tooltip
               contentStyle={{
@@ -74,12 +72,15 @@ function LatencyLineChart({
               }}
               labelStyle={{ color: "#334155" }}
               itemStyle={{ color: "#475569" }}
-              formatter={(value: number, name: string) => [`${value} ms`, name]}
+              formatter={(value: number, name: string) => [
+                `${typeof value === "number" ? Number(value).toFixed(unit === "ms" ? 0 : 2) : value} ${unit}`,
+                name,
+              ]}
             />
             <Legend />
             {lines.map((line) => (
               <Line
-                key={line.dataKey}
+                key={String(line.dataKey)}
                 type="monotone"
                 dataKey={line.dataKey}
                 name={line.name}
@@ -121,25 +122,53 @@ export function ModelLatencyCharts({ blocks }: { blocks: ModelLatencyBlock[] }) 
             </div>
             <div className="space-y-3">
               <LatencyLineChart
-                title="平均"
+                title={metricTitle(METRICS.ttft)}
+                subtitle={METRICS.ttft.desc}
                 data={data}
                 lines={[
-                  { dataKey: "avg_ttft_ms", name: "TTFT", stroke: "#3b82f6" },
-                  { dataKey: "avg_latency_ms", name: "总耗时", stroke: "#f59e0b" },
+                  { dataKey: "avg_ttft_ms", name: "平均值", stroke: "#3b82f6" },
+                  { dataKey: "p50_ttft_ms", name: "中位数 P50", stroke: "#0ea5e9" },
+                  { dataKey: "p99_ttft_ms", name: "P99", stroke: "#6366f1" },
                 ]}
               />
               <LatencyLineChart
-                title="最大响应"
+                title={metricTitle(METRICS.tpot)}
+                subtitle={METRICS.tpot.desc}
                 data={data}
                 lines={[
-                  { dataKey: "latency_max_ms", name: "最大", stroke: "#ef4444" },
+                  { dataKey: "avg_tpot_ms", name: "平均值", stroke: "#f59e0b" },
+                  { dataKey: "p50_tpot_ms", name: "中位数 P50", stroke: "#fb923c" },
+                  { dataKey: "p99_tpot_ms", name: "P99", stroke: "#ea580c" },
                 ]}
               />
               <LatencyLineChart
-                title="时段总延时"
+                title={metricTitle(METRICS.itl)}
+                subtitle={METRICS.itl.desc}
                 data={data}
                 lines={[
-                  { dataKey: "latency_sum_ms", name: "总延时", stroke: "#22c55e" },
+                  { dataKey: "avg_itl_ms", name: "平均值", stroke: "#22c55e" },
+                  { dataKey: "p50_itl_ms", name: "中位数 P50", stroke: "#4ade80" },
+                  { dataKey: "p99_itl_ms", name: "P99", stroke: "#16a34a" },
+                ]}
+              />
+              <LatencyLineChart
+                title={metricTitle(METRICS.latency)}
+                subtitle={METRICS.latency.desc}
+                data={data}
+                lines={[
+                  { dataKey: "avg_latency_ms", name: "平均总耗时", stroke: "#64748b" },
+                  { dataKey: "latency_max_ms", name: "最大总耗时", stroke: "#ef4444" },
+                ]}
+              />
+              <LatencyLineChart
+                title="吞吐"
+                subtitle={`${METRICS.requestTps.desc}；${METRICS.outputTps.desc}；${METRICS.totalTokenTps.desc}`}
+                data={data}
+                unit="/s"
+                lines={[
+                  { dataKey: "request_tps", name: "请求吞吐 req/s", stroke: "#8b5cf6" },
+                  { dataKey: "output_tps", name: "输出 Token tok/s", stroke: "#ec4899" },
+                  { dataKey: "total_token_tps", name: "总 Token tok/s", stroke: "#14b8a6" },
                 ]}
               />
             </div>

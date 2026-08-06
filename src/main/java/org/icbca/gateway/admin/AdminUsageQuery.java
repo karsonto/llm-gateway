@@ -1,6 +1,7 @@
 package org.icbca.gateway.admin;
 
 import org.icbca.gateway.db.SqliteDatabase;
+import org.icbca.gateway.usage.LatencyHistBins;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -103,6 +104,9 @@ public final class AdminUsageQuery {
                     long activeUsers = queryActiveUsers(connection, todayStr);
                     List<TrendPoint> trend = queryTokenTrend(connection, trendFrom, todayStr);
                     List<LatencyPoint> latency = queryLatency24h(connection, latencyFrom);
+                    Map<String, long[]> histByBucketMetric =
+                            queryHistAggByBucket(connection, latencyFrom, null, null);
+                    BenchmarkAgg bench24h = aggregateBenchmark(latency, histByBucketMetric);
                     List<TopUser> topUsers = queryTopUsers(connection, todayStr);
                     List<TopDepartment> topDepartments = queryTopDepartments(connection, todayStr);
 
@@ -115,6 +119,18 @@ public final class AdminUsageQuery {
                             .append(",\"month_tokens\":").append(monthTotals[0])
                             .append(",\"today_active_users\":").append(activeUsers)
                             .append(",\"month_requests\":").append(monthTotals[1])
+                            .append(",\"avg_ttft_ms\":").append(bench24h.avgTtftMs)
+                            .append(",\"p50_ttft_ms\":").append(bench24h.p50TtftMs)
+                            .append(",\"p99_ttft_ms\":").append(bench24h.p99TtftMs)
+                            .append(",\"avg_tpot_ms\":").append(bench24h.avgTpotMs)
+                            .append(",\"p50_tpot_ms\":").append(bench24h.p50TpotMs)
+                            .append(",\"p99_tpot_ms\":").append(bench24h.p99TpotMs)
+                            .append(",\"avg_itl_ms\":").append(bench24h.avgItlMs)
+                            .append(",\"p50_itl_ms\":").append(bench24h.p50ItlMs)
+                            .append(",\"p99_itl_ms\":").append(bench24h.p99ItlMs)
+                            .append(",\"request_tps\":").append(formatDouble(bench24h.requestTps))
+                            .append(",\"output_tps\":").append(formatDouble(bench24h.outputTps))
+                            .append(",\"total_token_tps\":").append(formatDouble(bench24h.totalTokenTps))
                             .append('}');
 
                     sb.append(",\"token_trend_7d\":[");
@@ -136,10 +152,7 @@ public final class AdminUsageQuery {
                             sb.append(',');
                         }
                         LatencyPoint p = latency.get(i);
-                        sb.append("{\"bucket\":\"").append(escape(p.bucket)).append("\"")
-                                .append(",\"avg_latency_ms\":").append(p.avgLatencyMs)
-                                .append(",\"request_count\":").append(p.requestCount)
-                                .append('}');
+                        appendLatencyPointJson(sb, p);
                     }
                     sb.append(']');
 
@@ -181,7 +194,11 @@ public final class AdminUsageQuery {
         } catch (SQLException e) {
             log.warn("queryOverview failed: {}", e.getMessage());
             return "{\"generated_at\":\"\",\"kpis\":{\"today_requests\":0,\"today_tokens\":0,"
-                    + "\"month_tokens\":0,\"today_active_users\":0,\"month_requests\":0},"
+                    + "\"month_tokens\":0,\"today_active_users\":0,\"month_requests\":0,"
+                    + "\"avg_ttft_ms\":0,\"p50_ttft_ms\":0,\"p99_ttft_ms\":0,"
+                    + "\"avg_tpot_ms\":0,\"p50_tpot_ms\":0,\"p99_tpot_ms\":0,"
+                    + "\"avg_itl_ms\":0,\"p50_itl_ms\":0,\"p99_itl_ms\":0,"
+                    + "\"request_tps\":0,\"output_tps\":0,\"total_token_tps\":0},"
                     + "\"token_trend_7d\":[],\"latency_24h\":[],\"top_users_today\":[],"
                     + "\"top_departments_today\":[],"
                     + "\"token_breakdown_today\":{\"prompt_tokens\":0,\"completion_tokens\":0},"
@@ -291,10 +308,21 @@ public final class AdminUsageQuery {
 
     private static List<LatencyPoint> queryLatency24h(java.sql.Connection connection,
                                                       String fromBucket) throws SQLException {
+        Map<String, long[]> hist = queryHistAggByBucket(connection, fromBucket, null, null);
         PreparedStatement ps = connection.prepareStatement(
                 "SELECT hour_bucket, "
                         + "COALESCE(SUM(latency_sum_ms), 0) AS latency_sum_ms, "
-                        + "COALESCE(SUM(request_count), 0) AS request_count "
+                        + "COALESCE(SUM(request_count), 0) AS request_count, "
+                        + "COALESCE(SUM(ttft_sum_ms), 0) AS ttft_sum_ms, "
+                        + "COALESCE(SUM(ttft_count), 0) AS ttft_count, "
+                        + "COALESCE(SUM(tpot_sum_ms), 0) AS tpot_sum_ms, "
+                        + "COALESCE(SUM(tpot_count), 0) AS tpot_count, "
+                        + "COALESCE(SUM(itl_sum_ms), 0) AS itl_sum_ms, "
+                        + "COALESCE(SUM(itl_count), 0) AS itl_count, "
+                        + "COALESCE(SUM(output_tps_milli_sum), 0) AS output_tps_milli_sum, "
+                        + "COALESCE(SUM(output_tps_count), 0) AS output_tps_count, "
+                        + "COALESCE(SUM(prompt_tokens_sum), 0) AS prompt_tokens_sum, "
+                        + "COALESCE(SUM(completion_tokens_sum), 0) AS completion_tokens_sum "
                         + "FROM latency_hourly WHERE hour_bucket >= ? "
                         + "GROUP BY hour_bucket ORDER BY hour_bucket ASC");
         try {
@@ -303,10 +331,22 @@ public final class AdminUsageQuery {
             try {
                 List<LatencyPoint> list = new ArrayList<LatencyPoint>();
                 while (rs.next()) {
-                    long req = rs.getLong("request_count");
-                    long sum = rs.getLong("latency_sum_ms");
-                    long avg = req > 0 ? sum / req : 0L;
-                    list.add(new LatencyPoint(rs.getString("hour_bucket"), avg, req));
+                    String bucket = rs.getString("hour_bucket");
+                    list.add(buildLatencyPoint(
+                            bucket,
+                            rs.getLong("request_count"),
+                            rs.getLong("latency_sum_ms"),
+                            rs.getLong("ttft_sum_ms"),
+                            rs.getLong("ttft_count"),
+                            rs.getLong("tpot_sum_ms"),
+                            rs.getLong("tpot_count"),
+                            rs.getLong("itl_sum_ms"),
+                            rs.getLong("itl_count"),
+                            rs.getLong("output_tps_milli_sum"),
+                            rs.getLong("output_tps_count"),
+                            rs.getLong("prompt_tokens_sum"),
+                            rs.getLong("completion_tokens_sum"),
+                            hist));
                 }
                 return list;
             } finally {
@@ -700,12 +740,15 @@ public final class AdminUsageQuery {
     public String queryLatencyByModelJson(String from, String to, String model) {
         try {
             final String modelFilter = model == null ? "" : model.trim();
-            List<LatencyRow> rows = db.withConnection(new SqliteDatabase.SqlWork<List<LatencyRow>>() {
+            return db.withConnection(new SqliteDatabase.SqlWork<String>() {
                 @Override
-                public List<LatencyRow> run(java.sql.Connection connection) throws SQLException {
+                public String run(java.sql.Connection connection) throws SQLException {
                     StringBuilder sql = new StringBuilder(
                             "SELECT model, hour_bucket, request_count, latency_sum_ms, "
-                                    + "latency_max_ms, ttft_sum_ms, ttft_count "
+                                    + "latency_max_ms, ttft_sum_ms, ttft_count, "
+                                    + "tpot_sum_ms, tpot_count, itl_sum_ms, itl_count, "
+                                    + "output_tps_milli_sum, output_tps_count, "
+                                    + "prompt_tokens_sum, completion_tokens_sum "
                                     + "FROM latency_hourly WHERE 1=1");
                     List<String> params = new ArrayList<String>();
                     appendHourBucketFilters(sql, params, from, to);
@@ -719,9 +762,9 @@ public final class AdminUsageQuery {
                         for (int i = 0; i < params.size(); i++) {
                             ps.setString(i + 1, params.get(i));
                         }
+                        List<LatencyRow> list = new ArrayList<LatencyRow>();
                         ResultSet rs = ps.executeQuery();
                         try {
-                            List<LatencyRow> list = new ArrayList<LatencyRow>();
                             while (rs.next()) {
                                 list.add(new LatencyRow(
                                         rs.getString("model"),
@@ -730,18 +773,27 @@ public final class AdminUsageQuery {
                                         rs.getLong("latency_sum_ms"),
                                         rs.getLong("latency_max_ms"),
                                         rs.getLong("ttft_sum_ms"),
-                                        rs.getLong("ttft_count")));
+                                        rs.getLong("ttft_count"),
+                                        rs.getLong("tpot_sum_ms"),
+                                        rs.getLong("tpot_count"),
+                                        rs.getLong("itl_sum_ms"),
+                                        rs.getLong("itl_count"),
+                                        rs.getLong("output_tps_milli_sum"),
+                                        rs.getLong("output_tps_count"),
+                                        rs.getLong("prompt_tokens_sum"),
+                                        rs.getLong("completion_tokens_sum")));
                             }
-                            return list;
                         } finally {
                             rs.close();
                         }
+                        Map<String, long[]> hist = queryHistByModelBucket(
+                                connection, from, to, modelFilter);
+                        return toLatencyModelsJson(list, hist);
                     } finally {
                         ps.close();
                     }
                 }
             });
-            return toLatencyModelsJson(rows);
         } catch (SQLException e) {
             log.warn("queryLatencyByModel failed: {}", e.getMessage());
             return "{\"models\":[],\"error\":\"" + escape(e.getMessage()) + "\"}";
@@ -760,7 +812,7 @@ public final class AdminUsageQuery {
         }
     }
 
-    private static String toLatencyModelsJson(List<LatencyRow> rows) {
+    private static String toLatencyModelsJson(List<LatencyRow> rows, Map<String, long[]> hist) {
         Map<String, LatencyModelAgg> byModel = new LinkedHashMap<String, LatencyModelAgg>();
         for (LatencyRow row : rows) {
             String model = row.model == null ? "unknown" : row.model;
@@ -787,20 +839,285 @@ public final class AdminUsageQuery {
                     sb.append(',');
                 }
                 LatencyRow r = agg.series.get(j);
-                long avgLatency = r.requestCount > 0 ? r.latencySumMs / r.requestCount : 0L;
-                long avgTtft = r.ttftCount > 0 ? r.ttftSumMs / r.ttftCount : 0L;
-                sb.append("{\"bucket\":\"").append(escape(r.hourBucket)).append("\"")
-                        .append(",\"request_count\":").append(r.requestCount)
-                        .append(",\"avg_ttft_ms\":").append(avgTtft)
-                        .append(",\"avg_latency_ms\":").append(avgLatency)
-                        .append(",\"latency_sum_ms\":").append(r.latencySumMs)
-                        .append(",\"latency_max_ms\":").append(r.latencyMaxMs)
-                        .append('}');
+                LatencyPoint p = metricsFromRow(r, hist);
+                appendLatencyPointJson(sb, p);
             }
             sb.append("]}");
         }
         sb.append("]}");
         return sb.toString();
+    }
+
+    private static LatencyPoint metricsFromRow(LatencyRow r, Map<String, long[]> hist) {
+        String model = r.model == null ? "unknown" : r.model;
+        long avgLatency = r.requestCount > 0 ? r.latencySumMs / r.requestCount : 0L;
+        long avgTtft = r.ttftCount > 0 ? r.ttftSumMs / r.ttftCount : 0L;
+        long avgTpot = r.tpotCount > 0 ? r.tpotSumMs / r.tpotCount : 0L;
+        long avgItl = r.itlCount > 0 ? r.itlSumMs / r.itlCount : 0L;
+        double outputTps = r.outputTpsCount > 0
+                ? (r.outputTpsMilliSum / (double) r.outputTpsCount) / 1000.0 : 0.0;
+        double requestTps = r.requestCount / 3600.0;
+        double totalTokenTps = (r.promptTokensSum + r.completionTokensSum) / 3600.0;
+        long p50Ttft = percentileFromHist(hist, model, r.hourBucket, LatencyHistBins.METRIC_TTFT, 0.50);
+        long p99Ttft = percentileFromHist(hist, model, r.hourBucket, LatencyHistBins.METRIC_TTFT, 0.99);
+        long p50Tpot = percentileFromHist(hist, model, r.hourBucket, LatencyHistBins.METRIC_TPOT, 0.50);
+        long p99Tpot = percentileFromHist(hist, model, r.hourBucket, LatencyHistBins.METRIC_TPOT, 0.99);
+        long p50Itl = percentileFromHist(hist, model, r.hourBucket, LatencyHistBins.METRIC_ITL, 0.50);
+        long p99Itl = percentileFromHist(hist, model, r.hourBucket, LatencyHistBins.METRIC_ITL, 0.99);
+        return new LatencyPoint(
+                r.hourBucket, avgLatency, r.requestCount,
+                avgTtft, p50Ttft, p99Ttft,
+                avgTpot, p50Tpot, p99Tpot,
+                avgItl, p50Itl, p99Itl,
+                requestTps, outputTps, totalTokenTps,
+                r.latencySumMs, r.latencyMaxMs,
+                r.ttftSumMs, r.ttftCount, r.tpotSumMs, r.tpotCount,
+                r.itlSumMs, r.itlCount, r.outputTpsMilliSum, r.outputTpsCount,
+                r.promptTokensSum, r.completionTokensSum);
+    }
+
+    private static LatencyPoint buildLatencyPoint(
+            String bucket, long requestCount, long latencySumMs,
+            long ttftSumMs, long ttftCount, long tpotSumMs, long tpotCount,
+            long itlSumMs, long itlCount, long outputTpsMilliSum, long outputTpsCount,
+            long promptTokensSum, long completionTokensSum,
+            Map<String, long[]> histByBucketMetric) {
+        long avgLatency = requestCount > 0 ? latencySumMs / requestCount : 0L;
+        long avgTtft = ttftCount > 0 ? ttftSumMs / ttftCount : 0L;
+        long avgTpot = tpotCount > 0 ? tpotSumMs / tpotCount : 0L;
+        long avgItl = itlCount > 0 ? itlSumMs / itlCount : 0L;
+        double outputTps = outputTpsCount > 0
+                ? (outputTpsMilliSum / (double) outputTpsCount) / 1000.0 : 0.0;
+        double requestTps = requestCount / 3600.0;
+        double totalTokenTps = (promptTokensSum + completionTokensSum) / 3600.0;
+        long p50Ttft = percentileFromBucketHist(histByBucketMetric, bucket, LatencyHistBins.METRIC_TTFT, 0.50);
+        long p99Ttft = percentileFromBucketHist(histByBucketMetric, bucket, LatencyHistBins.METRIC_TTFT, 0.99);
+        long p50Tpot = percentileFromBucketHist(histByBucketMetric, bucket, LatencyHistBins.METRIC_TPOT, 0.50);
+        long p99Tpot = percentileFromBucketHist(histByBucketMetric, bucket, LatencyHistBins.METRIC_TPOT, 0.99);
+        long p50Itl = percentileFromBucketHist(histByBucketMetric, bucket, LatencyHistBins.METRIC_ITL, 0.50);
+        long p99Itl = percentileFromBucketHist(histByBucketMetric, bucket, LatencyHistBins.METRIC_ITL, 0.99);
+        return new LatencyPoint(
+                bucket, avgLatency, requestCount,
+                avgTtft, p50Ttft, p99Ttft,
+                avgTpot, p50Tpot, p99Tpot,
+                avgItl, p50Itl, p99Itl,
+                requestTps, outputTps, totalTokenTps,
+                latencySumMs, 0L,
+                ttftSumMs, ttftCount, tpotSumMs, tpotCount,
+                itlSumMs, itlCount, outputTpsMilliSum, outputTpsCount,
+                promptTokensSum, completionTokensSum);
+    }
+
+    private static void appendLatencyPointJson(StringBuilder sb, LatencyPoint p) {
+        sb.append("{\"bucket\":\"").append(escape(p.bucket)).append("\"")
+                .append(",\"request_count\":").append(p.requestCount)
+                .append(",\"avg_latency_ms\":").append(p.avgLatencyMs)
+                .append(",\"latency_sum_ms\":").append(p.latencySumMs)
+                .append(",\"latency_max_ms\":").append(p.latencyMaxMs)
+                .append(",\"avg_ttft_ms\":").append(p.avgTtftMs)
+                .append(",\"p50_ttft_ms\":").append(p.p50TtftMs)
+                .append(",\"p99_ttft_ms\":").append(p.p99TtftMs)
+                .append(",\"avg_tpot_ms\":").append(p.avgTpotMs)
+                .append(",\"p50_tpot_ms\":").append(p.p50TpotMs)
+                .append(",\"p99_tpot_ms\":").append(p.p99TpotMs)
+                .append(",\"avg_itl_ms\":").append(p.avgItlMs)
+                .append(",\"p50_itl_ms\":").append(p.p50ItlMs)
+                .append(",\"p99_itl_ms\":").append(p.p99ItlMs)
+                .append(",\"request_tps\":").append(formatDouble(p.requestTps))
+                .append(",\"output_tps\":").append(formatDouble(p.outputTps))
+                .append(",\"total_token_tps\":").append(formatDouble(p.totalTokenTps))
+                .append('}');
+    }
+
+    private static String formatDouble(double v) {
+        if (Double.isNaN(v) || Double.isInfinite(v)) {
+            return "0";
+        }
+        return String.format(java.util.Locale.US, "%.4f", v);
+    }
+
+    /**
+     * Key: model|hour_bucket|metric -> parallel bin counts aligned with LatencyHistBins.bins().
+     */
+    private static Map<String, long[]> queryHistByModelBucket(
+            java.sql.Connection connection, String from, String to, String modelFilter)
+            throws SQLException {
+        StringBuilder sql = new StringBuilder(
+                "SELECT model, hour_bucket, metric, bin, cnt FROM latency_hist_hourly WHERE 1=1");
+        List<String> params = new ArrayList<String>();
+        appendHourBucketFilters(sql, params, from, to);
+        if (modelFilter != null && !modelFilter.isEmpty()) {
+            sql.append(" AND model = ?");
+            params.add(modelFilter);
+        }
+        PreparedStatement ps = connection.prepareStatement(sql.toString());
+        try {
+            for (int i = 0; i < params.size(); i++) {
+                ps.setString(i + 1, params.get(i));
+            }
+            return loadHistMap(ps, true);
+        } finally {
+            ps.close();
+        }
+    }
+
+    /**
+     * Key: hour_bucket|metric -> counts (models aggregated).
+     */
+    private static Map<String, long[]> queryHistAggByBucket(
+            java.sql.Connection connection, String fromBucket, String fromDay, String toDay)
+            throws SQLException {
+        StringBuilder sql = new StringBuilder(
+                "SELECT hour_bucket, metric, bin, SUM(cnt) AS cnt "
+                        + "FROM latency_hist_hourly WHERE 1=1");
+        List<String> params = new ArrayList<String>();
+        if (fromBucket != null && !fromBucket.isEmpty()) {
+            sql.append(" AND hour_bucket >= ?");
+            params.add(fromBucket);
+        }
+        if (fromDay != null && !fromDay.isEmpty()) {
+            sql.append(" AND hour_bucket >= ?");
+            params.add(fromDay.trim() + " 00");
+        }
+        if (toDay != null && !toDay.isEmpty()) {
+            sql.append(" AND hour_bucket <= ?");
+            params.add(toDay.trim() + " 23");
+        }
+        sql.append(" GROUP BY hour_bucket, metric, bin");
+        PreparedStatement ps = connection.prepareStatement(sql.toString());
+        try {
+            for (int i = 0; i < params.size(); i++) {
+                ps.setString(i + 1, params.get(i));
+            }
+            return loadHistMap(ps, false);
+        } finally {
+            ps.close();
+        }
+    }
+
+    private static Map<String, long[]> loadHistMap(PreparedStatement ps, boolean includeModel)
+            throws SQLException {
+        ResultSet rs = ps.executeQuery();
+        try {
+            long[] template = LatencyHistBins.bins();
+            Map<String, long[]> map = new HashMap<String, long[]>();
+            while (rs.next()) {
+                String metric = rs.getString("metric");
+                String bucket = rs.getString("hour_bucket");
+                long bin = rs.getLong("bin");
+                long cnt = rs.getLong("cnt");
+                String key;
+                if (includeModel) {
+                    key = rs.getString("model") + "|" + bucket + "|" + metric;
+                } else {
+                    key = bucket + "|" + metric;
+                }
+                long[] counts = map.get(key);
+                if (counts == null) {
+                    counts = new long[template.length];
+                    map.put(key, counts);
+                }
+                for (int i = 0; i < template.length; i++) {
+                    if (template[i] == bin) {
+                        counts[i] += cnt;
+                        break;
+                    }
+                }
+            }
+            return map;
+        } finally {
+            rs.close();
+        }
+    }
+
+    private static long percentileFromHist(Map<String, long[]> hist, String model,
+                                           String bucket, String metric, double p) {
+        if (hist == null) {
+            return 0L;
+        }
+        long[] counts = hist.get(model + "|" + bucket + "|" + metric);
+        if (counts == null) {
+            return 0L;
+        }
+        return LatencyHistBins.percentile(LatencyHistBins.bins(), counts, p);
+    }
+
+    private static long percentileFromBucketHist(Map<String, long[]> hist, String bucket,
+                                                 String metric, double p) {
+        if (hist == null) {
+            return 0L;
+        }
+        long[] counts = hist.get(bucket + "|" + metric);
+        if (counts == null) {
+            return 0L;
+        }
+        return LatencyHistBins.percentile(LatencyHistBins.bins(), counts, p);
+    }
+
+    private static BenchmarkAgg aggregateBenchmark(List<LatencyPoint> points,
+                                                   Map<String, long[]> histByBucketMetric) {
+        BenchmarkAgg agg = new BenchmarkAgg();
+        if (points == null || points.isEmpty()) {
+            return agg;
+        }
+        long req = 0L;
+        long ttftSum = 0L;
+        long ttftCount = 0L;
+        long tpotSum = 0L;
+        long tpotCount = 0L;
+        long itlSum = 0L;
+        long itlCount = 0L;
+        long outputMilliSum = 0L;
+        long outputCount = 0L;
+        long promptSum = 0L;
+        long completionSum = 0L;
+        long[] ttftCounts = new long[LatencyHistBins.bins().length];
+        long[] tpotCounts = new long[LatencyHistBins.bins().length];
+        long[] itlCounts = new long[LatencyHistBins.bins().length];
+        for (LatencyPoint p : points) {
+            req += p.requestCount;
+            ttftSum += p.ttftSumMs;
+            ttftCount += p.ttftCount;
+            tpotSum += p.tpotSumMs;
+            tpotCount += p.tpotCount;
+            itlSum += p.itlSumMs;
+            itlCount += p.itlCount;
+            outputMilliSum += p.outputTpsMilliSum;
+            outputCount += p.outputTpsCount;
+            promptSum += p.promptTokensSum;
+            completionSum += p.completionTokensSum;
+            mergeHist(ttftCounts, histByBucketMetric, p.bucket, LatencyHistBins.METRIC_TTFT);
+            mergeHist(tpotCounts, histByBucketMetric, p.bucket, LatencyHistBins.METRIC_TPOT);
+            mergeHist(itlCounts, histByBucketMetric, p.bucket, LatencyHistBins.METRIC_ITL);
+        }
+        agg.avgTtftMs = ttftCount > 0 ? ttftSum / ttftCount : 0L;
+        agg.avgTpotMs = tpotCount > 0 ? tpotSum / tpotCount : 0L;
+        agg.avgItlMs = itlCount > 0 ? itlSum / itlCount : 0L;
+        agg.p50TtftMs = LatencyHistBins.percentile(LatencyHistBins.bins(), ttftCounts, 0.50);
+        agg.p99TtftMs = LatencyHistBins.percentile(LatencyHistBins.bins(), ttftCounts, 0.99);
+        agg.p50TpotMs = LatencyHistBins.percentile(LatencyHistBins.bins(), tpotCounts, 0.50);
+        agg.p99TpotMs = LatencyHistBins.percentile(LatencyHistBins.bins(), tpotCounts, 0.99);
+        agg.p50ItlMs = LatencyHistBins.percentile(LatencyHistBins.bins(), itlCounts, 0.50);
+        agg.p99ItlMs = LatencyHistBins.percentile(LatencyHistBins.bins(), itlCounts, 0.99);
+        double hours = Math.max(1.0, points.size());
+        agg.requestTps = req / (hours * 3600.0);
+        agg.outputTps = outputCount > 0 ? (outputMilliSum / (double) outputCount) / 1000.0 : 0.0;
+        agg.totalTokenTps = (promptSum + completionSum) / (hours * 3600.0);
+        return agg;
+    }
+
+    private static void mergeHist(long[] dest, Map<String, long[]> hist,
+                                  String bucket, String metric) {
+        if (hist == null) {
+            return;
+        }
+        long[] src = hist.get(bucket + "|" + metric);
+        if (src == null) {
+            return;
+        }
+        for (int i = 0; i < dest.length && i < src.length; i++) {
+            dest[i] += src[i];
+        }
     }
 
     private static void appendDateFilters(StringBuilder sql, List<String> params,
@@ -1051,9 +1368,20 @@ public final class AdminUsageQuery {
         final long latencyMaxMs;
         final long ttftSumMs;
         final long ttftCount;
+        final long tpotSumMs;
+        final long tpotCount;
+        final long itlSumMs;
+        final long itlCount;
+        final long outputTpsMilliSum;
+        final long outputTpsCount;
+        final long promptTokensSum;
+        final long completionTokensSum;
 
         LatencyRow(String model, String hourBucket, long requestCount,
-                   long latencySumMs, long latencyMaxMs, long ttftSumMs, long ttftCount) {
+                   long latencySumMs, long latencyMaxMs, long ttftSumMs, long ttftCount,
+                   long tpotSumMs, long tpotCount, long itlSumMs, long itlCount,
+                   long outputTpsMilliSum, long outputTpsCount,
+                   long promptTokensSum, long completionTokensSum) {
             this.model = model;
             this.hourBucket = hourBucket;
             this.requestCount = requestCount;
@@ -1061,6 +1389,14 @@ public final class AdminUsageQuery {
             this.latencyMaxMs = latencyMaxMs;
             this.ttftSumMs = ttftSumMs;
             this.ttftCount = ttftCount;
+            this.tpotSumMs = tpotSumMs;
+            this.tpotCount = tpotCount;
+            this.itlSumMs = itlSumMs;
+            this.itlCount = itlCount;
+            this.outputTpsMilliSum = outputTpsMilliSum;
+            this.outputTpsCount = outputTpsCount;
+            this.promptTokensSum = promptTokensSum;
+            this.completionTokensSum = completionTokensSum;
         }
     }
 
@@ -1090,12 +1426,83 @@ public final class AdminUsageQuery {
         final String bucket;
         final long avgLatencyMs;
         final long requestCount;
+        final long avgTtftMs;
+        final long p50TtftMs;
+        final long p99TtftMs;
+        final long avgTpotMs;
+        final long p50TpotMs;
+        final long p99TpotMs;
+        final long avgItlMs;
+        final long p50ItlMs;
+        final long p99ItlMs;
+        final double requestTps;
+        final double outputTps;
+        final double totalTokenTps;
+        final long latencySumMs;
+        final long latencyMaxMs;
+        final long ttftSumMs;
+        final long ttftCount;
+        final long tpotSumMs;
+        final long tpotCount;
+        final long itlSumMs;
+        final long itlCount;
+        final long outputTpsMilliSum;
+        final long outputTpsCount;
+        final long promptTokensSum;
+        final long completionTokensSum;
 
-        LatencyPoint(String bucket, long avgLatencyMs, long requestCount) {
+        LatencyPoint(String bucket, long avgLatencyMs, long requestCount,
+                     long avgTtftMs, long p50TtftMs, long p99TtftMs,
+                     long avgTpotMs, long p50TpotMs, long p99TpotMs,
+                     long avgItlMs, long p50ItlMs, long p99ItlMs,
+                     double requestTps, double outputTps, double totalTokenTps,
+                     long latencySumMs, long latencyMaxMs,
+                     long ttftSumMs, long ttftCount, long tpotSumMs, long tpotCount,
+                     long itlSumMs, long itlCount, long outputTpsMilliSum, long outputTpsCount,
+                     long promptTokensSum, long completionTokensSum) {
             this.bucket = bucket;
             this.avgLatencyMs = avgLatencyMs;
             this.requestCount = requestCount;
+            this.avgTtftMs = avgTtftMs;
+            this.p50TtftMs = p50TtftMs;
+            this.p99TtftMs = p99TtftMs;
+            this.avgTpotMs = avgTpotMs;
+            this.p50TpotMs = p50TpotMs;
+            this.p99TpotMs = p99TpotMs;
+            this.avgItlMs = avgItlMs;
+            this.p50ItlMs = p50ItlMs;
+            this.p99ItlMs = p99ItlMs;
+            this.requestTps = requestTps;
+            this.outputTps = outputTps;
+            this.totalTokenTps = totalTokenTps;
+            this.latencySumMs = latencySumMs;
+            this.latencyMaxMs = latencyMaxMs;
+            this.ttftSumMs = ttftSumMs;
+            this.ttftCount = ttftCount;
+            this.tpotSumMs = tpotSumMs;
+            this.tpotCount = tpotCount;
+            this.itlSumMs = itlSumMs;
+            this.itlCount = itlCount;
+            this.outputTpsMilliSum = outputTpsMilliSum;
+            this.outputTpsCount = outputTpsCount;
+            this.promptTokensSum = promptTokensSum;
+            this.completionTokensSum = completionTokensSum;
         }
+    }
+
+    private static final class BenchmarkAgg {
+        long avgTtftMs;
+        long p50TtftMs;
+        long p99TtftMs;
+        long avgTpotMs;
+        long p50TpotMs;
+        long p99TpotMs;
+        long avgItlMs;
+        long p50ItlMs;
+        long p99ItlMs;
+        double requestTps;
+        double outputTps;
+        double totalTokenTps;
     }
 
     private static final class TopUser {

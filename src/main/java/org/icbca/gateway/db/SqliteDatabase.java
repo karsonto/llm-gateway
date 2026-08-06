@@ -99,6 +99,14 @@ public final class SqliteDatabase implements AutoCloseable {
                                 + "latency_max_ms INTEGER NOT NULL DEFAULT 0,"
                                 + "ttft_sum_ms INTEGER NOT NULL DEFAULT 0,"
                                 + "ttft_count INTEGER NOT NULL DEFAULT 0,"
+                                + "tpot_sum_ms INTEGER NOT NULL DEFAULT 0,"
+                                + "tpot_count INTEGER NOT NULL DEFAULT 0,"
+                                + "itl_sum_ms INTEGER NOT NULL DEFAULT 0,"
+                                + "itl_count INTEGER NOT NULL DEFAULT 0,"
+                                + "output_tps_milli_sum INTEGER NOT NULL DEFAULT 0,"
+                                + "output_tps_count INTEGER NOT NULL DEFAULT 0,"
+                                + "prompt_tokens_sum INTEGER NOT NULL DEFAULT 0,"
+                                + "completion_tokens_sum INTEGER NOT NULL DEFAULT 0,"
                                 + "UNIQUE (model, hour_bucket)"
                                 + ")");
                 st.execute(
@@ -108,6 +116,22 @@ public final class SqliteDatabase implements AutoCloseable {
                         "CREATE INDEX IF NOT EXISTS idx_latency_hourly_model "
                                 + "ON latency_hourly(model)");
                 migrateLatencyHourlyAddMaxMs(st);
+                migrateLatencyHourlyAddBenchmarkCols(st);
+                st.execute(
+                        "CREATE TABLE IF NOT EXISTS latency_hist_hourly ("
+                                + "model TEXT NOT NULL,"
+                                + "hour_bucket TEXT NOT NULL,"
+                                + "metric TEXT NOT NULL,"
+                                + "bin INTEGER NOT NULL,"
+                                + "cnt INTEGER NOT NULL DEFAULT 0,"
+                                + "UNIQUE (model, hour_bucket, metric, bin)"
+                                + ")");
+                st.execute(
+                        "CREATE INDEX IF NOT EXISTS idx_latency_hist_bucket "
+                                + "ON latency_hist_hourly(hour_bucket)");
+                st.execute(
+                        "CREATE INDEX IF NOT EXISTS idx_latency_hist_model_metric "
+                                + "ON latency_hist_hourly(model, metric)");
             } finally {
                 st.close();
             }
@@ -139,6 +163,26 @@ public final class SqliteDatabase implements AutoCloseable {
         st.execute(
                 "ALTER TABLE latency_hourly ADD COLUMN latency_max_ms INTEGER NOT NULL DEFAULT 0");
         log.info("migrated latency_hourly: added latency_max_ms");
+    }
+
+    private void migrateLatencyHourlyAddBenchmarkCols(Statement st) throws SQLException {
+        addLongColumnIfMissing(st, "latency_hourly", "tpot_sum_ms");
+        addLongColumnIfMissing(st, "latency_hourly", "tpot_count");
+        addLongColumnIfMissing(st, "latency_hourly", "itl_sum_ms");
+        addLongColumnIfMissing(st, "latency_hourly", "itl_count");
+        addLongColumnIfMissing(st, "latency_hourly", "output_tps_milli_sum");
+        addLongColumnIfMissing(st, "latency_hourly", "output_tps_count");
+        addLongColumnIfMissing(st, "latency_hourly", "prompt_tokens_sum");
+        addLongColumnIfMissing(st, "latency_hourly", "completion_tokens_sum");
+    }
+
+    private void addLongColumnIfMissing(Statement st, String table, String column)
+            throws SQLException {
+        if (columnExists(st, table, column)) {
+            return;
+        }
+        st.execute("ALTER TABLE " + table + " ADD COLUMN " + column + " INTEGER NOT NULL DEFAULT 0");
+        log.info("migrated {}: added {}", table, column);
     }
 
     private static boolean columnExists(Statement st, String table, String column)

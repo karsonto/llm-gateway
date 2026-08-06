@@ -18,8 +18,10 @@ import io.netty.handler.codec.http.HttpUtil;
 import io.netty.handler.codec.http.LastHttpContent;
 import io.netty.util.ReferenceCountUtil;
 import org.icbca.gateway.parse.SseTokenParser;
+import org.icbca.gateway.parse.TokenTimingStats;
 import org.icbca.gateway.proxy.UpstreamAttributes;
 import org.icbca.gateway.usage.LatencyRecorder;
+import org.icbca.gateway.usage.LatencySample;
 import org.icbca.gateway.usage.TokenUsage;
 import org.icbca.gateway.usage.UsageRecorder;
 import org.slf4j.Logger;
@@ -214,7 +216,45 @@ public final class UpstreamHandler extends ChannelInboundHandlerAdapter {
         }
         latencyRecorded = true;
         long latencyMs = Math.max(0L, (System.nanoTime() - startNanos.longValue()) / 1_000_000L);
-        latencyRecorder.record(model, latencyMs, ttftMs);
+
+        TokenTimingStats timing = sseParser.snapshotTiming();
+        TokenUsage usage = sseParser.getUsage();
+        long promptTokens = usage == null ? 0L : usage.getPromptTokens();
+        long completionTokens = usage == null ? 0L : usage.getCompletionTokens();
+
+        long ttftStrictMs = -1L;
+        if (timing.hasFirstToken()) {
+            ttftStrictMs = Math.max(0L,
+                    (timing.getFirstTokenNanos() - startNanos.longValue()) / 1_000_000L);
+        } else if (ttftMs >= 0) {
+            ttftStrictMs = ttftMs;
+        }
+
+        long tpotMs = -1L;
+        long outputTpsMilli = -1L;
+        if (timing.hasFirstToken()
+                && timing.getLastTokenNanos() >= timing.getFirstTokenNanos()
+                && completionTokens > 1) {
+            long genMs = Math.max(1L,
+                    (timing.getLastTokenNanos() - timing.getFirstTokenNanos()) / 1_000_000L);
+            tpotMs = genMs / Math.max(1L, completionTokens - 1);
+            double tps = (completionTokens * 1000.0) / (double) genMs;
+            outputTpsMilli = Math.max(0L, Math.round(tps * 1000.0));
+        } else if (timing.hasFirstToken()
+                && timing.getLastTokenNanos() > timing.getFirstTokenNanos()
+                && completionTokens == 1) {
+            outputTpsMilli = 0L;
+        }
+
+        long itlMs = -1L;
+        if (timing.getIntervalCount() > 0) {
+            itlMs = Math.max(0L,
+                    (timing.getIntervalSumNanos() / timing.getIntervalCount()) / 1_000_000L);
+        }
+
+        latencyRecorder.record(model, new LatencySample(
+                latencyMs, ttftStrictMs, tpotMs, itlMs, outputTpsMilli,
+                promptTokens, completionTokens));
     }
 
     @Override

@@ -5,8 +5,5 @@ package org.icbca.gateway.usage;
  */
 public interface LatencyRecorder {
 
-    /**
-     * @param ttftMs time to first upstream byte in ms; {@code < 0} if unavailable
-     */
-    void record(String model, long latencyMs, long ttftMs);
+    void record(String model, LatencySample sample);
 }

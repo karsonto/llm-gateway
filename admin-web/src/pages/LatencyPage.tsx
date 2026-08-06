@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { LatencyChartResponse, ModelLatencyBlock, fetchUsageLatency } from "../api";
 import { ModelLatencyCharts } from "../components/ModelLatencyCharts";
+import { METRIC_GLOSSARY, metricTitle } from "../metricLabels";
 
 function today() {
   return new Date().toISOString().slice(0, 10);
@@ -20,6 +21,7 @@ export default function LatencyPage() {
   const [blocks, setBlocks] = useState<ModelLatencyBlock[]>([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [showGlossary, setShowGlossary] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -52,8 +54,29 @@ export default function LatencyPage() {
       <div>
         <h1 className="text-xl font-semibold text-slate-800">响应延迟</h1>
         <p className="text-sm text-slate-500 mt-1">
-          按小时统计各模型平均 TTFT/总耗时、最大响应与时段总延时
+          按小时统计各模型的首 Token 时延 (TTFT)、单 Token 生成时延 (TPOT)、Token 间隔 (ITL)
+          以及吞吐；含平均值、中位数与 P99
         </p>
+        <button
+          type="button"
+          onClick={() => setShowGlossary((v) => !v)}
+          className="mt-2 text-xs text-sky-600 hover:underline"
+        >
+          {showGlossary ? "收起指标说明" : "查看指标说明"}
+        </button>
+        {showGlossary && (
+          <div className="mt-2 rounded-xl border border-slate-200 bg-white p-4 text-sm space-y-2">
+            {METRIC_GLOSSARY.map((m) => (
+              <div key={m.key} className="flex gap-3">
+                <span className="shrink-0 w-40 font-medium text-slate-700">{metricTitle(m)}</span>
+                <span className="text-slate-500">
+                  {m.desc}
+                  {m.unit ? `（单位：${m.unit}）` : ""}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="flex flex-wrap gap-3 items-end rounded-xl border border-slate-200 bg-white p-4">
@@ -78,7 +101,7 @@ export default function LatencyPage() {
         <div className="space-y-1">
           <label className="text-xs text-slate-500">模型</label>
           <select
-            className="h-9 min-w-[180px] px-2 rounded-lg border border-slate-200 text-sm"
+            className="h-9 min-w-[160px] px-2 rounded-lg border border-slate-200 text-sm"
             value={model}
             onChange={(e) => setModel(e.target.value)}
           >

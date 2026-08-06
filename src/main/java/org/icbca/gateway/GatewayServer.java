@@ -25,7 +25,6 @@ import org.icbca.gateway.handler.UsageQueryHandler;
 import org.icbca.gateway.inspect.InspectorPipeline;
 import org.icbca.gateway.proxy.UpstreamClient;
 import org.icbca.gateway.usage.LatencyRecorder;
-import org.icbca.gateway.usage.LatencyRecorder;
 import org.icbca.gateway.usage.NoopLatencyRecorder;
 import org.icbca.gateway.usage.UsageRecorder;
 import org.slf4j.Logger;

@@ -11,7 +11,7 @@ public final class NoopLatencyRecorder implements LatencyRecorder {
     }
 
     @Override
-    public void record(String model, long latencyMs, long ttftMs) {
+    public void record(String model, LatencySample sample) {
         // no-op
     }
 }
