@@ -30,3 +30,70 @@ body {
   color: hsl(var(--foreground));
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
 }
+
+/* Dashboard wall display */
+.dashboard-wall {
+  --dash-bg: #0b1220;
+  --dash-panel: rgba(15, 23, 42, 0.72);
+  --dash-line: rgba(148, 163, 184, 0.16);
+  --dash-text: #e2e8f0;
+  --dash-muted: #94a3b8;
+  --dash-accent: #38bdf8;
+  --dash-warn: #f59e0b;
+  --dash-danger: #f43f5e;
+  font-family: "DM Sans", ui-sans-serif, system-ui, sans-serif;
+  color: var(--dash-text);
+  background:
+    radial-gradient(ellipse 80% 50% at 20% -10%, rgba(56, 189, 248, 0.18), transparent 55%),
+    radial-gradient(ellipse 60% 40% at 90% 10%, rgba(34, 211, 238, 0.08), transparent 50%),
+    linear-gradient(180deg, #0b1220 0%, #0f172a 100%);
+  min-height: 100%;
+}
+
+.dashboard-wall .dash-mono {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.dashboard-wall .dash-panel {
+  background: var(--dash-panel);
+  border: 1px solid var(--dash-line);
+  backdrop-filter: blur(8px);
+}
+
+.dashboard-wall .dash-grid {
+  background-image:
+    linear-gradient(var(--dash-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--dash-line) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.35), transparent 85%);
+}
+
+.layout-fullscreen aside {
+  display: none;
+}
+
+.layout-fullscreen main > div {
+  max-width: none !important;
+  padding: 0 !important;
+}
+
+.layout-fullscreen .dashboard-wall {
+  min-height: 100vh;
+  padding: 1.25rem 1.5rem 1.5rem;
+}
+
+@keyframes dash-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.dashboard-wall .dash-animate {
+  animation: dash-fade-in 0.45s ease-out both;
+}

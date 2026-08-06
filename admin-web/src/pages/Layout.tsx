@@ -1,8 +1,11 @@
-import { NavLink, Outlet, useNavigate } from "react-router-dom";
-import { KeyRound, BarChart3, Trophy, Timer, LogOut } from "lucide-react";
+import { NavLink, Outlet, useNavigate, useLocation } from "react-router-dom";
+import { KeyRound, BarChart3, Trophy, Timer, LogOut, LayoutDashboard } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
 import { logout, setToken } from "../api";
+import DashboardPage from "./DashboardPage";
 
 const nav = [
+  { to: "/", label: "总览", icon: LayoutDashboard, end: true },
   { to: "/keys", label: "API Keys", icon: KeyRound },
   { to: "/usage", label: "用量查询", icon: BarChart3, end: true },
   { to: "/usage/rank", label: "用量排名", icon: Trophy },
@@ -11,6 +14,46 @@ const nav = [
 
 export default function Layout() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const [fullscreen, setFullscreen] = useState(false);
+  const isDashboard = location.pathname === "/" || location.pathname === "";
+
+  const exitFullscreenUi = useCallback(() => {
+    setFullscreen(false);
+  }, []);
+
+  async function onToggleFullscreen() {
+    try {
+      if (!document.fullscreenElement) {
+        await document.documentElement.requestFullscreen();
+        setFullscreen(true);
+      } else {
+        await document.exitFullscreen();
+        setFullscreen(false);
+      }
+    } catch {
+      setFullscreen((v) => !v);
+    }
+  }
+
+  useEffect(() => {
+    function onFsChange() {
+      if (!document.fullscreenElement) {
+        exitFullscreenUi();
+      }
+    }
+    document.addEventListener("fullscreenchange", onFsChange);
+    return () => document.removeEventListener("fullscreenchange", onFsChange);
+  }, [exitFullscreenUi]);
+
+  useEffect(() => {
+    if (!isDashboard && fullscreen) {
+      if (document.fullscreenElement) {
+        document.exitFullscreen().catch(() => {});
+      }
+      setFullscreen(false);
+    }
+  }, [isDashboard, fullscreen]);
 
   async function onLogout() {
     try {
@@ -23,7 +66,7 @@ export default function Layout() {
   }
 
   return (
-    <div className="min-h-screen flex bg-slate-50">
+    <div className={`min-h-screen flex bg-slate-50 ${fullscreen ? "layout-fullscreen" : ""}`}>
       <aside className="w-56 shrink-0 border-r border-slate-200 bg-white flex flex-col">
         <div className="h-14 px-4 flex items-center gap-2 border-b border-slate-100 font-semibold text-slate-800">
           <KeyRound className="w-4 h-4 text-sky-500" />
@@ -56,8 +99,12 @@ export default function Layout() {
         </button>
       </aside>
       <main className="flex-1 overflow-auto">
-        <div className="max-w-6xl mx-auto p-6">
-          <Outlet />
+        <div className={fullscreen ? "" : "max-w-6xl mx-auto p-6"}>
+          {isDashboard ? (
+            <DashboardPage fullscreen={fullscreen} onToggleFullscreen={onToggleFullscreen} />
+          ) : (
+            <Outlet />
+          )}
         </div>
       </main>
     </div>

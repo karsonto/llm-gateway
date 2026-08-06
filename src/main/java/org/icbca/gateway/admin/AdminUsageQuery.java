@@ -7,6 +7,8 @@ import org.slf4j.LoggerFactory;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.YearMonth;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
@@ -24,6 +26,8 @@ public final class AdminUsageQuery {
 
     private static final Logger log = LoggerFactory.getLogger(AdminUsageQuery.class);
     private static final DateTimeFormatter DAY = DateTimeFormatter.ISO_LOCAL_DATE;
+    private static final DateTimeFormatter HOUR = DateTimeFormatter.ofPattern("yyyy-MM-dd HH");
+    private static final DateTimeFormatter ISO_INSTANT = DateTimeFormatter.ISO_OFFSET_DATE_TIME;
 
     private final SqliteDatabase db;
     private final ZoneId zoneId;
@@ -73,6 +77,325 @@ public final class AdminUsageQuery {
         } catch (SQLException e) {
             log.warn("sumTotalTokensByKeyForCurrentMonth failed: {}", e.getMessage());
             return Collections.emptyMap();
+        }
+    }
+
+    /**
+     * Product overview dashboard payload (KPIs, trends, top users, quota alerts).
+     */
+    public String queryOverviewJson() {
+        try {
+            return db.withConnection(new SqliteDatabase.SqlWork<String>() {
+                @Override
+                public String run(java.sql.Connection connection) throws SQLException {
+                    LocalDate today = LocalDate.now(zoneId);
+                    String todayStr = today.format(DAY);
+                    YearMonth ym = YearMonth.from(today);
+                    String monthFrom = ym.atDay(1).format(DAY);
+                    String monthToExcl = ym.plusMonths(1).atDay(1).format(DAY);
+                    String trendFrom = today.minusDays(6).format(DAY);
+
+                    LocalDateTime nowHour = LocalDateTime.now(zoneId).withMinute(0).withSecond(0).withNano(0);
+                    String latencyFrom = nowHour.minusHours(23).format(HOUR);
+
+                    long[] todayTotals = queryTodayTotals(connection, todayStr);
+                    long monthTokens = queryMonthTokens(connection, monthFrom, monthToExcl);
+                    long activeUsers = queryActiveUsers(connection, todayStr);
+                    List<TrendPoint> trend = queryTokenTrend(connection, trendFrom, todayStr);
+                    List<LatencyPoint> latency = queryLatency24h(connection, latencyFrom);
+                    List<TopUser> topUsers = queryTopUsers(connection, todayStr);
+                    QuotaAlertResult alerts = queryQuotaAlerts(connection, monthFrom, monthToExcl);
+
+                    String generatedAt = java.time.ZonedDateTime.now(zoneId).format(ISO_INSTANT);
+                    StringBuilder sb = new StringBuilder(1024);
+                    sb.append("{\"generated_at\":\"").append(escape(generatedAt)).append("\"")
+                            .append(",\"kpis\":{")
+                            .append("\"today_requests\":").append(todayTotals[0])
+                            .append(",\"today_tokens\":").append(todayTotals[1])
+                            .append(",\"month_tokens\":").append(monthTokens)
+                            .append(",\"today_active_users\":").append(activeUsers)
+                            .append(",\"quota_near_count\":").append(alerts.nearCount)
+                            .append(",\"quota_exceeded_count\":").append(alerts.exceededCount)
+                            .append('}');
+
+                    sb.append(",\"token_trend_7d\":[");
+                    for (int i = 0; i < trend.size(); i++) {
+                        if (i > 0) {
+                            sb.append(',');
+                        }
+                        TrendPoint t = trend.get(i);
+                        sb.append("{\"date\":\"").append(escape(t.date)).append("\"")
+                                .append(",\"total_tokens\":").append(t.totalTokens)
+                                .append(",\"request_count\":").append(t.requestCount)
+                                .append('}');
+                    }
+                    sb.append(']');
+
+                    sb.append(",\"latency_24h\":[");
+                    for (int i = 0; i < latency.size(); i++) {
+                        if (i > 0) {
+                            sb.append(',');
+                        }
+                        LatencyPoint p = latency.get(i);
+                        sb.append("{\"bucket\":\"").append(escape(p.bucket)).append("\"")
+                                .append(",\"avg_latency_ms\":").append(p.avgLatencyMs)
+                                .append(",\"request_count\":").append(p.requestCount)
+                                .append('}');
+                    }
+                    sb.append(']');
+
+                    sb.append(",\"top_users_today\":[");
+                    for (int i = 0; i < topUsers.size(); i++) {
+                        if (i > 0) {
+                            sb.append(',');
+                        }
+                        TopUser u = topUsers.get(i);
+                        sb.append("{\"name\":\"").append(escape(u.name)).append("\"")
+                                .append(",\"group_name\":\"").append(escape(u.groupName)).append("\"")
+                                .append(",\"total_tokens\":").append(u.totalTokens)
+                                .append(",\"request_count\":").append(u.requestCount)
+                                .append('}');
+                    }
+                    sb.append(']');
+
+                    sb.append(",\"quota_alerts\":[");
+                    for (int i = 0; i < alerts.rows.size(); i++) {
+                        if (i > 0) {
+                            sb.append(',');
+                        }
+                        QuotaAlertRow r = alerts.rows.get(i);
+                        sb.append("{\"api_key\":\"").append(escape(r.apiKey)).append("\"")
+                                .append(",\"name\":\"").append(escape(r.name)).append("\"")
+                                .append(",\"limit\":").append(r.limit)
+                                .append(",\"used\":").append(r.used)
+                                .append(",\"ratio\":").append(String.format(java.util.Locale.US, "%.4f", r.ratio))
+                                .append(",\"status\":\"").append(escape(r.status)).append("\"")
+                                .append('}');
+                    }
+                    sb.append("]}");
+                    return sb.toString();
+                }
+            });
+        } catch (SQLException e) {
+            log.warn("queryOverview failed: {}", e.getMessage());
+            return "{\"generated_at\":\"\",\"kpis\":{\"today_requests\":0,\"today_tokens\":0,"
+                    + "\"month_tokens\":0,\"today_active_users\":0,\"quota_near_count\":0,"
+                    + "\"quota_exceeded_count\":0},\"token_trend_7d\":[],\"latency_24h\":[],"
+                    + "\"top_users_today\":[],\"quota_alerts\":[],\"error\":\""
+                    + escape(e.getMessage()) + "\"}";
+        }
+    }
+
+    private static long[] queryTodayTotals(java.sql.Connection connection, String today)
+            throws SQLException {
+        PreparedStatement ps = connection.prepareStatement(
+                "SELECT COALESCE(SUM(request_count), 0), COALESCE(SUM(total_tokens), 0) "
+                        + "FROM usage_daily WHERE usage_date = ?");
+        try {
+            ps.setString(1, today);
+            ResultSet rs = ps.executeQuery();
+            try {
+                if (rs.next()) {
+                    return new long[] { rs.getLong(1), rs.getLong(2) };
+                }
+                return new long[] { 0L, 0L };
+            } finally {
+                rs.close();
+            }
+        } finally {
+            ps.close();
+        }
+    }
+
+    private static long queryMonthTokens(java.sql.Connection connection, String from, String toExcl)
+            throws SQLException {
+        PreparedStatement ps = connection.prepareStatement(
+                "SELECT COALESCE(SUM(total_tokens), 0) FROM usage_daily "
+                        + "WHERE usage_date >= ? AND usage_date < ?");
+        try {
+            ps.setString(1, from);
+            ps.setString(2, toExcl);
+            ResultSet rs = ps.executeQuery();
+            try {
+                return rs.next() ? rs.getLong(1) : 0L;
+            } finally {
+                rs.close();
+            }
+        } finally {
+            ps.close();
+        }
+    }
+
+    private static long queryActiveUsers(java.sql.Connection connection, String today)
+            throws SQLException {
+        PreparedStatement ps = connection.prepareStatement(
+                "SELECT COUNT(DISTINCT COALESCE(k.name, u.api_key)) "
+                        + "FROM usage_daily u LEFT JOIN api_keys k ON u.api_key = k.api_key "
+                        + "WHERE u.usage_date = ?");
+        try {
+            ps.setString(1, today);
+            ResultSet rs = ps.executeQuery();
+            try {
+                return rs.next() ? rs.getLong(1) : 0L;
+            } finally {
+                rs.close();
+            }
+        } finally {
+            ps.close();
+        }
+    }
+
+    private static List<TrendPoint> queryTokenTrend(java.sql.Connection connection,
+                                                    String from, String toInclusive)
+            throws SQLException {
+        PreparedStatement ps = connection.prepareStatement(
+                "SELECT usage_date, COALESCE(SUM(total_tokens), 0) AS total_tokens, "
+                        + "COALESCE(SUM(request_count), 0) AS request_count "
+                        + "FROM usage_daily WHERE usage_date >= ? AND usage_date <= ? "
+                        + "GROUP BY usage_date ORDER BY usage_date ASC");
+        try {
+            ps.setString(1, from);
+            ps.setString(2, toInclusive);
+            ResultSet rs = ps.executeQuery();
+            try {
+                Map<String, TrendPoint> byDate = new LinkedHashMap<String, TrendPoint>();
+                LocalDate start = LocalDate.parse(from);
+                LocalDate end = LocalDate.parse(toInclusive);
+                for (LocalDate d = start; !d.isAfter(end); d = d.plusDays(1)) {
+                    String key = d.format(DAY);
+                    byDate.put(key, new TrendPoint(key, 0L, 0L));
+                }
+                while (rs.next()) {
+                    String date = rs.getString("usage_date");
+                    byDate.put(date, new TrendPoint(
+                            date, rs.getLong("total_tokens"), rs.getLong("request_count")));
+                }
+                return new ArrayList<TrendPoint>(byDate.values());
+            } finally {
+                rs.close();
+            }
+        } finally {
+            ps.close();
+        }
+    }
+
+    private static List<LatencyPoint> queryLatency24h(java.sql.Connection connection,
+                                                      String fromBucket) throws SQLException {
+        PreparedStatement ps = connection.prepareStatement(
+                "SELECT hour_bucket, "
+                        + "COALESCE(SUM(latency_sum_ms), 0) AS latency_sum_ms, "
+                        + "COALESCE(SUM(request_count), 0) AS request_count "
+                        + "FROM latency_hourly WHERE hour_bucket >= ? "
+                        + "GROUP BY hour_bucket ORDER BY hour_bucket ASC");
+        try {
+            ps.setString(1, fromBucket);
+            ResultSet rs = ps.executeQuery();
+            try {
+                List<LatencyPoint> list = new ArrayList<LatencyPoint>();
+                while (rs.next()) {
+                    long req = rs.getLong("request_count");
+                    long sum = rs.getLong("latency_sum_ms");
+                    long avg = req > 0 ? sum / req : 0L;
+                    list.add(new LatencyPoint(rs.getString("hour_bucket"), avg, req));
+                }
+                return list;
+            } finally {
+                rs.close();
+            }
+        } finally {
+            ps.close();
+        }
+    }
+
+    private static List<TopUser> queryTopUsers(java.sql.Connection connection, String today)
+            throws SQLException {
+        PreparedStatement ps = connection.prepareStatement(
+                "SELECT COALESCE(k.name, u.api_key) AS user_name, "
+                        + "COALESCE(MAX(k.group_name), 'default') AS group_name, "
+                        + "COALESCE(SUM(u.total_tokens), 0) AS total_tokens, "
+                        + "COALESCE(SUM(u.request_count), 0) AS request_count "
+                        + "FROM usage_daily u LEFT JOIN api_keys k ON u.api_key = k.api_key "
+                        + "WHERE u.usage_date = ? "
+                        + "GROUP BY COALESCE(k.name, u.api_key) "
+                        + "ORDER BY total_tokens DESC, request_count DESC LIMIT 10");
+        try {
+            ps.setString(1, today);
+            ResultSet rs = ps.executeQuery();
+            try {
+                List<TopUser> list = new ArrayList<TopUser>();
+                while (rs.next()) {
+                    list.add(new TopUser(
+                            rs.getString("user_name"),
+                            rs.getString("group_name"),
+                            rs.getLong("total_tokens"),
+                            rs.getLong("request_count")));
+                }
+                return list;
+            } finally {
+                rs.close();
+            }
+        } finally {
+            ps.close();
+        }
+    }
+
+    private static QuotaAlertResult queryQuotaAlerts(java.sql.Connection connection,
+                                                     String monthFrom, String monthToExcl)
+            throws SQLException {
+        PreparedStatement ps = connection.prepareStatement(
+                "SELECT k.api_key, k.name, k.monthly_token_limit, "
+                        + "COALESCE(SUM(u.total_tokens), 0) AS used "
+                        + "FROM api_keys k "
+                        + "LEFT JOIN usage_daily u ON u.api_key = k.api_key "
+                        + "AND u.usage_date >= ? AND u.usage_date < ? "
+                        + "WHERE k.monthly_token_limit > 0 "
+                        + "GROUP BY k.api_key, k.name, k.monthly_token_limit");
+        try {
+            ps.setString(1, monthFrom);
+            ps.setString(2, monthToExcl);
+            ResultSet rs = ps.executeQuery();
+            try {
+                List<QuotaAlertRow> all = new ArrayList<QuotaAlertRow>();
+                int near = 0;
+                int exceeded = 0;
+                while (rs.next()) {
+                    long limit = rs.getLong("monthly_token_limit");
+                    long used = rs.getLong("used");
+                    if (limit <= 0L) {
+                        continue;
+                    }
+                    double ratio = (double) used / (double) limit;
+                    String status;
+                    if (ratio >= 1.0d) {
+                        status = "exceeded";
+                        exceeded++;
+                    } else if (ratio >= 0.8d) {
+                        status = "near";
+                        near++;
+                    } else {
+                        continue;
+                    }
+                    all.add(new QuotaAlertRow(
+                            rs.getString("api_key"),
+                            rs.getString("name"),
+                            limit,
+                            used,
+                            ratio,
+                            status));
+                }
+                Collections.sort(all, new java.util.Comparator<QuotaAlertRow>() {
+                    @Override
+                    public int compare(QuotaAlertRow a, QuotaAlertRow b) {
+                        return Double.compare(b.ratio, a.ratio);
+                    }
+                });
+                List<QuotaAlertRow> top = all.size() > 20 ? all.subList(0, 20) : all;
+                return new QuotaAlertResult(near, exceeded, new ArrayList<QuotaAlertRow>(top));
+            } finally {
+                rs.close();
+            }
+        } finally {
+            ps.close();
         }
     }
 
@@ -635,6 +958,74 @@ public final class AdminUsageQuery {
 
         LatencyModelAgg(String model) {
             this.model = model;
+        }
+    }
+
+    private static final class TrendPoint {
+        final String date;
+        final long totalTokens;
+        final long requestCount;
+
+        TrendPoint(String date, long totalTokens, long requestCount) {
+            this.date = date;
+            this.totalTokens = totalTokens;
+            this.requestCount = requestCount;
+        }
+    }
+
+    private static final class LatencyPoint {
+        final String bucket;
+        final long avgLatencyMs;
+        final long requestCount;
+
+        LatencyPoint(String bucket, long avgLatencyMs, long requestCount) {
+            this.bucket = bucket;
+            this.avgLatencyMs = avgLatencyMs;
+            this.requestCount = requestCount;
+        }
+    }
+
+    private static final class TopUser {
+        final String name;
+        final String groupName;
+        final long totalTokens;
+        final long requestCount;
+
+        TopUser(String name, String groupName, long totalTokens, long requestCount) {
+            this.name = name;
+            this.groupName = groupName;
+            this.totalTokens = totalTokens;
+            this.requestCount = requestCount;
+        }
+    }
+
+    private static final class QuotaAlertRow {
+        final String apiKey;
+        final String name;
+        final long limit;
+        final long used;
+        final double ratio;
+        final String status;
+
+        QuotaAlertRow(String apiKey, String name, long limit, long used, double ratio, String status) {
+            this.apiKey = apiKey;
+            this.name = name;
+            this.limit = limit;
+            this.used = used;
+            this.ratio = ratio;
+            this.status = status;
+        }
+    }
+
+    private static final class QuotaAlertResult {
+        final int nearCount;
+        final int exceededCount;
+        final List<QuotaAlertRow> rows;
+
+        QuotaAlertResult(int nearCount, int exceededCount, List<QuotaAlertRow> rows) {
+            this.nearCount = nearCount;
+            this.exceededCount = exceededCount;
+            this.rows = rows;
         }
     }
 }

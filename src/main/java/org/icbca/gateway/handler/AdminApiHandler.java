@@ -169,6 +169,14 @@ public final class AdminApiHandler extends SimpleChannelInboundHandler<FullHttpR
                 return;
             }
 
+            if ("/overview".equals(sub) && HttpMethod.GET.equals(request.method())) {
+                if (!requireAuth(ctx, request)) {
+                    return;
+                }
+                writeJson(ctx, HttpResponseStatus.OK, usageQuery.queryOverviewJson());
+                return;
+            }
+
             writeError(ctx, HttpResponseStatus.NOT_FOUND, "not_found", "Unknown admin API path");
         } finally {
             request.release();

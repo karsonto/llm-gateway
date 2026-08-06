@@ -196,3 +196,51 @@ export const fetchUsageLatency = (from?: string, to?: string, model?: string) =>
   const qs = q.toString();
   return api<LatencyChartResponse>(qs ? `/usage/latency?${qs}` : "/usage/latency");
 };
+
+export type OverviewKpis = {
+  today_requests: number;
+  today_tokens: number;
+  month_tokens: number;
+  today_active_users: number;
+  quota_near_count: number;
+  quota_exceeded_count: number;
+};
+
+export type OverviewTrendPoint = {
+  date: string;
+  total_tokens: number;
+  request_count: number;
+};
+
+export type OverviewLatencyPoint = {
+  bucket: string;
+  avg_latency_ms: number;
+  request_count: number;
+};
+
+export type OverviewTopUser = {
+  name: string;
+  group_name: string;
+  total_tokens: number;
+  request_count: number;
+};
+
+export type OverviewQuotaAlert = {
+  api_key: string;
+  name: string;
+  limit: number;
+  used: number;
+  ratio: number;
+  status: "near" | "exceeded" | string;
+};
+
+export type OverviewResponse = {
+  generated_at: string;
+  kpis: OverviewKpis;
+  token_trend_7d: OverviewTrendPoint[];
+  latency_24h: OverviewLatencyPoint[];
+  top_users_today: OverviewTopUser[];
+  quota_alerts: OverviewQuotaAlert[];
+};
+
+export const fetchOverview = () => api<OverviewResponse>("/overview");

@@ -24,7 +24,7 @@ export default function App() {
           </RequireAuth>
         }
       >
-        <Route index element={<Navigate to="/keys" replace />} />
+        <Route index element={null} />
         <Route path="keys" element={<KeysPage />} />
         <Route path="usage" element={<UsagePage />} />
         <Route path="usage/rank" element={<UsageRankPage />} />
