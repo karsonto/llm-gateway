@@ -35,6 +35,13 @@ public final class UpstreamHandler extends ChannelInboundHandlerAdapter {
 
     private static final Logger log = LoggerFactory.getLogger(UpstreamHandler.class);
 
+    /** At least two SSE content chunks so first≠last is a real decode span. */
+    private static final long MIN_CHUNKS_FOR_OUTPUT_TPS = 2L;
+    /** Ignore sub-50ms windows (non-stream / batched flush → genMs≈1 explosion). */
+    private static final long MIN_GEN_MS_FOR_OUTPUT_TPS = 50L;
+    /** Hard cap; above this the sample is treated as invalid instrumentation. */
+    private static final double MAX_PLAUSIBLE_OUTPUT_TPS = 2000.0;
+
     private final Channel inbound;
     private final String requestId;
     private final boolean expectStream;
@@ -232,18 +239,20 @@ public final class UpstreamHandler extends ChannelInboundHandlerAdapter {
 
         long tpotMs = -1L;
         long outputTpsMilli = -1L;
+        // Decode throughput needs a real multi-chunk stream window. Non-stream /
+        // single-chunk / sub-ms spans clamp genMs to 1 and explode to ~tokens*1000.
         if (timing.hasFirstToken()
-                && timing.getLastTokenNanos() >= timing.getFirstTokenNanos()
-                && completionTokens > 1) {
-            long genMs = Math.max(1L,
-                    (timing.getLastTokenNanos() - timing.getFirstTokenNanos()) / 1_000_000L);
-            tpotMs = genMs / Math.max(1L, completionTokens - 1);
-            double tps = (completionTokens * 1000.0) / (double) genMs;
-            outputTpsMilli = Math.max(0L, Math.round(tps * 1000.0));
-        } else if (timing.hasFirstToken()
+                && timing.getEmittedChunks() >= MIN_CHUNKS_FOR_OUTPUT_TPS
                 && timing.getLastTokenNanos() > timing.getFirstTokenNanos()
-                && completionTokens == 1) {
-            outputTpsMilli = 0L;
+                && completionTokens > 1) {
+            long genMs = (timing.getLastTokenNanos() - timing.getFirstTokenNanos()) / 1_000_000L;
+            if (genMs >= MIN_GEN_MS_FOR_OUTPUT_TPS) {
+                double tps = (completionTokens * 1000.0) / (double) genMs;
+                if (tps <= MAX_PLAUSIBLE_OUTPUT_TPS) {
+                    tpotMs = genMs / Math.max(1L, completionTokens - 1);
+                    outputTpsMilli = Math.max(0L, Math.round(tps * 1000.0));
+                }
+            }
         }
 
         long itlMs = -1L;
